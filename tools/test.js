@@ -2,9 +2,8 @@
 // Chạy: npm test  (dùng node:test có sẵn của Node, tương tự PHPUnit, không cần cài gì thêm)
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
 const F = require('../core.js');
-const { ROOT, readPortfolio, loadState } = require('./load.js');
+const { readPortfolio, loadState, git, isGitRepo } = require('./load.js');
 
 // Cấu hình mẫu cố định cho các test logic, để thêm tài sản hay đổi đơn vị trong portfolio.js
 // thật không làm đỏ cả bộ test. Sổ thật được kiểm tra riêng ở cuối file.
@@ -89,7 +88,8 @@ function checkInvariants(before, after, plan, prices = PRICES, { roundTrip = tru
   if (roundTrip) assertRoundTrip(after);
 }
 
-const replayHolders = (history) => F.replayShares(INITIAL, history);
+/** Cổ phần từng người tính lại từ mốc ban đầu và lịch sử, dạng object thường để so sánh. */
+const replayHolders = (history) => Object.fromEntries(F.replayShares(INITIAL, history).shares);
 
 describe('parseAmount', () => {
   test('nhận số nguyên, số lẻ bằng chấm hoặc phẩy', () => {
@@ -189,6 +189,38 @@ describe('validate', () => {
     const s = state0();
     s.assets.find((a) => a.id === 'gold').unit = 'luong';
     assert.ok(F.validate(s).some((e) => e.includes("ghi theo 'oz'")));
+  });
+  test('rút khi đang 0 cổ phần rồi góp bù lại vẫn bị phát hiện', () => {
+    let s = state0();
+    const p = val(s).price;
+    const cents = 10000;
+    const n = F.sharesForRut(cents, p);
+    s.history.push({ date: '2026-10-24', type: 'rut', name: 'Cam', amount: 100, shares: n, sharePrice: p });
+    s.history.push({ date: '2026-10-24', type: 'gop', name: 'Cam', amount: n * p > 100 ? 100 : 100, shares: F.sharesForGop(cents, p), sharePrice: p });
+    assert.ok(F.validate(s).some((e) => e.includes('khi chỉ còn')));
+  });
+  test('tên cổ đông trùng thuộc tính có sẵn của JS không lách được kiểm tra', () => {
+    for (const name of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+      const bad = structuredClone(START);
+      bad.shareholders.push({ name, shares: 500000 });
+      bad.totalShares += 500000;
+      assert.ok(F.validate(F.merge(PORTFOLIO, bad)).length > 0, name);
+    }
+  });
+  test('updatedAt và ngày trong lịch sử phải đúng dạng', () => {
+    const bad = structuredClone(START);
+    delete bad.updatedAt;
+    assert.ok(F.validate(F.merge(PORTFOLIO, bad)).some((e) => e.includes('updatedAt')));
+  });
+  test('units thừa id lạ bị từ chối; units khác thứ tự vẫn xuất lại khớp', () => {
+    const extra = structuredClone(START);
+    extra.units.eth = 'ETH';
+    assert.ok(F.validate(F.merge(PORTFOLIO, extra)).some((e) => e.includes('eth')));
+    const reordered = structuredClone(START);
+    reordered.units = { cash: 'USDT', gold: 'oz', btc: 'BTC' };
+    const st = F.merge(PORTFOLIO, reordered);
+    assert.deepEqual(F.validate(st), []);
+    assert.ok(F.sameLedger(F.merge(PORTFOLIO, F.evalCalculated(F.toSource(st))), st));
   });
   test('id tài sản bị trùng bị từ chối', () => {
     const s = state0();
@@ -438,30 +470,28 @@ describe('calculated.js thật', () => {
   });
   // Lịch sử chỉ được nối thêm: bản đã commit phải là phần đầu của bản đang sửa. Bắt được việc dán
   // một file tính trên sổ cũ, làm mất giao dịch đã ghi (file đó tự nó vẫn hợp lệ).
-  test('lịch sử chỉ nối thêm so với bản đã commit trong git', (t) => {
-    const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    try {
-      git('rev-parse', '--is-inside-work-tree');
-    } catch (e) {
+  // Sổ chỉ được nối thêm: mọi phiên bản calculated.js từng commit phải là phần đầu của bản hiện tại,
+  // và mốc initialShares không bao giờ đổi. So với toàn bộ lịch sử git (không chỉ commit liền trước),
+  // để một lần push làm mất giao dịch không thể "lọt" nhờ một commit khác đè lên sau đó.
+  test('lịch sử chỉ nối thêm so với mọi phiên bản đã commit trong git', (t) => {
+    if (!isGitRepo()) {
       t.skip('thư mục chưa là git repo');
       return;
     }
-    // Trên máy: so file đang sửa với HEAD. Trên CI: FUND_BASE_REF là commit trước lần push.
-    const base = process.env.FUND_BASE_REF || 'HEAD';
-    let committed;
-    try {
-      committed = git('show', `${base}:calculated.js`);
-    } catch (e) {
-      // Commit đầu tiên chưa có calculated.js thì không có gì để so; lỗi git khác thì phải báo đỏ.
-      if (/does not exist|exists on disk, but not in|bad revision|unknown revision|invalid object name/i.test(String(e.stderr))) {
-        t.skip(`${base} chưa có calculated.js`);
-        return;
-      }
-      throw e;
+    const versions = (path) => git('log', '--format=%H', '--', path).split('\n').filter(Boolean)
+      .map((sha) => ({ sha, source: git('show', `${sha}:${path}`) }));
+    const current = real.history;
+    for (const { sha, source } of versions('calculated.js')) {
+      const old = F.evalCalculated(source) || {};
+      const hist = Array.isArray(old.history) ? old.history : [];
+      assert.ok(current.length >= hist.length, `lịch sử ngắn hơn bản ${sha.slice(0, 7)}: ${hist.length} -> ${current.length}`);
+      hist.forEach((c, i) => assert.deepEqual(current[i], c, `dòng ${i + 1} khác bản ${sha.slice(0, 7)}`));
     }
-    const before = F.merge(readPortfolio(), F.evalCalculated(committed)).history;
-    assert.ok(real.history.length >= before.length, `lịch sử bị ngắn đi: ${before.length} -> ${real.history.length}`);
-    before.forEach((c, i) => assert.deepEqual(real.history[i], c, `dòng ${i + 1} của lịch sử đã commit bị đổi hoặc mất`));
+    const nowInitial = JSON.stringify(readPortfolio().initialShares);
+    for (const { sha, source } of versions('portfolio.js')) {
+      const old = F.evalCalculated(source, 'PORTFOLIO') || {};
+      if (old.initialShares !== undefined) assert.equal(JSON.stringify(old.initialShares), nowInitial, `initialShares khác bản ${sha.slice(0, 7)}`);
+    }
   });
   test('portfolio.js thật dùng được với core', () => assert.ok(Array.isArray(readPortfolio().assets)));
 });

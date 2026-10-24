@@ -35,6 +35,19 @@
   const todayISO = (d = new Date()) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+  /** fetch có giới hạn thời gian; quá hạn thì ném lỗi tên 'AbortError'. */
+  async function fetchWithTimeout(fetchImpl, url, options = {}, timeoutMs = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetchImpl(url, { ...options, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /* ---------- giá Binance ---------- */
 
   const pairsOf = (state) => [...new Set(state.assets.filter((a) => a.pair).map((a) => a.pair))];
@@ -58,10 +71,8 @@
     let lastErr;
     let rejected = 0;
     for (const host of hosts) {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const res = await fetchImpl(tickerUrl(host, pairs), { signal: ctrl.signal });
+        const res = await fetchWithTimeout(fetchImpl, tickerUrl(host, pairs), {}, timeoutMs);
         // 400 thường do một cặp sai tên, nhưng vẫn thử host còn lại; chỉ khi mọi host đều từ chối
         // mới kết luận là cặp sai.
         if (res.status === 400) {
@@ -72,8 +83,6 @@
         return { prices: parseTickers(await res.json()), host };
       } catch (e) {
         lastErr = e;
-      } finally {
-        clearTimeout(timer);
       }
     }
     if (rejected === hosts.length) {
@@ -144,6 +153,10 @@
    */
   function validate(state) {
     const errs = [...(state.shapeErrors || [])];
+    if (!ISO_DATE.test(String(state.updatedAt))) errs.push(`updatedAt phải có dạng YYYY-MM-DD (đang là ${JSON.stringify(state.updatedAt)}).`);
+    Object.keys(state.units || {}).forEach((id) => {
+      if (!state.assets.some((a) => a.id === id)) errs.push(`units có id không khai báo trong portfolio.js: ${id}.`);
+    });
     const ids = state.assets.map((a) => a.id);
     const dupIds = ids.filter((id, i) => ids.indexOf(id) !== i);
     if (dupIds.length) errs.push(`portfolio.js có id tài sản bị trùng: ${[...new Set(dupIds)].join(', ')} (sẽ bị cộng hai lần vào tổng tài sản).`);
@@ -197,6 +210,8 @@
       if (!isInt(c.shares) || c.shares < 1) errs.push(`Lịch sử dòng ${i + 1} thiếu số cổ phần hợp lệ.`);
       if (!isWholeCents(c.amount) || !(c.amount > 0)) errs.push(`Lịch sử dòng ${i + 1} có số tiền không hợp lệ.`);
       if (!(Number.isFinite(c.sharePrice) && c.sharePrice > 0)) errs.push(`Lịch sử dòng ${i + 1} có sharePrice không hợp lệ.`);
+      if (!ISO_DATE.test(String(c.date))) errs.push(`Lịch sử dòng ${i + 1} có ngày không hợp lệ: ${JSON.stringify(c.date)}.`);
+      if (typeof c.name !== 'string' || !c.name) errs.push(`Lịch sử dòng ${i + 1} thiếu tên.`);
       if (errs.length === before && !historyEntryValid(c)) errs.push(`Lịch sử dòng ${i + 1} (${c.name} ${c.type} ${c.amount}) không tính lại ra đúng ${c.shares} cổ phần theo giá đã ghi.`);
       if (errs.length !== before) historyOk = false;
     });
@@ -204,14 +219,16 @@
     // cho ai đó (kể cả khi đã sửa totalShares cho khớp).
     if (!state.initialShares) errs.push('portfolio.js thiếu initialShares (mốc cổ phần ban đầu của từng người).');
     else if (historyOk) {
-      const replay = replayShares(state.initialShares, state.history);
-      Object.keys(replay).forEach((name) => {
+      const { shares: replay, negative } = replayShares(state.initialShares, state.history);
+      // Rút khi đang không đủ cổ phần (dù về sau góp bù) là trả tiền từ cổ phần không có.
+      negative.forEach((n) => errs.push(`Lịch sử dòng ${n.index + 1}: ${n.name} rút ${n.shares} cổ phần khi chỉ còn ${n.had}.`));
+      replay.forEach((count, name) => {
         const h = state.shareholders.find((x) => x.name === name);
         if (!h) errs.push(`"${name}" có trong lịch sử/mốc ban đầu nhưng không có trong shareholders.`);
-        else if (h.shares !== replay[name]) errs.push(`${name} đang có ${h.shares} cổ phần nhưng mốc ban đầu cộng trừ lịch sử ra ${replay[name]}.`);
+        else if (h.shares !== count) errs.push(`${name} đang có ${h.shares} cổ phần nhưng mốc ban đầu cộng trừ lịch sử ra ${count}.`);
       });
       state.shareholders.forEach((h) => {
-        if (!(h.name in replay) && h.shares !== 0) errs.push(`${h.name} có ${h.shares} cổ phần nhưng không có trong mốc ban đầu hay lịch sử.`);
+        if (!replay.has(h.name) && h.shares !== 0) errs.push(`${h.name} có ${h.shares} cổ phần nhưng không có trong mốc ban đầu hay lịch sử.`);
       });
     }
     return errs;
@@ -273,11 +290,20 @@
   /** Rút toàn bộ `shares` theo giá `price`: số tiền trả (cents), làm tròn xuống. */
   const payoutForAll = (shares, price) => Math.floor(shares * price * 100 + EPS);
 
-  /** Cổ phần từng người tính từ mốc ban đầu cộng trừ lịch sử. */
+  /**
+   * Cổ phần từng người tính từ mốc ban đầu cộng trừ lịch sử, kèm các dòng rút làm số dư âm giữa chừng.
+   * Dùng Map để tên như "constructor" hay "__proto__" không đụng thuộc tính có sẵn của object.
+   */
   function replayShares(initial, history) {
-    const shares = { ...initial };
-    for (const c of history) shares[c.name] = (shares[c.name] || 0) + (c.type === 'gop' ? 1 : -1) * c.shares;
-    return shares;
+    const shares = new Map(Object.keys(initial || {}).map((name) => [name, initial[name]]));
+    const negative = [];
+    history.forEach((c, index) => {
+      const had = shares.get(c.name) || 0;
+      const now = had + (c.type === 'gop' ? 1 : -1) * c.shares;
+      if (now < 0) negative.push({ index, name: c.name, shares: c.shares, had });
+      shares.set(c.name, now);
+    });
+    return { shares, negative };
   }
 
   /** Một dòng lịch sử có tính lại ra đúng theo quy tắc làm tròn ở trên không. */
@@ -384,7 +410,7 @@
   /** Phần dữ liệu của state được ghi ra calculated.js, dùng để so sánh hai state. */
   const ledgerOf = (state) => ({
     totalShares: state.totalShares,
-    units: state.units,
+    units: state.assets.map((a) => [a.id, state.units ? state.units[a.id] : undefined]),
     amounts: Object.fromEntries(state.assets.map((a) => [a.id, a.amount])),
     shareholders: state.shareholders.map((h) => ({ name: h.name, shares: h.shares })),
     history: state.history.map((c) => ({ date: c.date, type: c.type, name: c.name, amount: c.amount, shares: c.shares, sharePrice: c.sharePrice })),
@@ -443,7 +469,7 @@ ${history.join('\n')}
   }
 
   return {
-    UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchPrices,
+    UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchWithTimeout, fetchPrices,
     parseAmount, merge, validate, valuation,
     sharesForGop, sharesForRut, payoutForAll, historyEntryValid, replayShares,
     planTx, applyTx, prepareTx, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset,

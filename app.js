@@ -21,7 +21,8 @@
   const REFRESH_MS = 60_000;
   // Mọi trang GitHub Pages của cùng một tài khoản dùng chung origin <user>.github.io, nên khoá
   // localStorage kèm đường dẫn trang để không đè dữ liệu của trang khác.
-  const KEY_PREFIX = `invest:${window.location.pathname}:`;
+  const PAGE_PATH = window.location.pathname.replace(/index\.html$/, '');
+  const KEY_PREFIX = `invest:${PAGE_PATH}:`;
   const CACHE_KEY = `${KEY_PREFIX}tickers`;
   const UNIT_LABEL = { oz: 'oz', luong: 'lượng', chi: 'chỉ', gram: 'g' };
 
@@ -249,7 +250,9 @@
         ${cell('h-pct', 'Sở hữu', fmtOwn(h.shares))}
         ${cell('h-value', `Giá trị (${curLabel()})`, fmtMoney(h.value))}
       </div>`).join('');
+  }
 
+  function renderHistory() {
     $('history-wrap').hidden = !S.history.length;
     $('history').innerHTML = [...S.history].reverse().map((c) => `
       <li class="tx-${txType(c)}">
@@ -372,16 +375,12 @@
    */
   async function latestLedgerProblem() {
     let latest;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
-      const res = await fetch(`calculated.js?v=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal });
+      const res = await F.fetchWithTimeout(window.fetch.bind(window), `calculated.js?v=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       latest = F.merge(window.PORTFOLIO, F.evalCalculated(await res.text()));
     } catch (e) {
       return `Không kiểm tra được calculated.js mới nhất trên máy chủ (${e.name === 'AbortError' ? 'quá 8 giây' : e.message}), chưa làm để tránh ghi đè. Mở trang qua http(s), không mở thẳng file, rồi thử lại.`;
-    } finally {
-      clearTimeout(timer);
     }
     return F.sameLedger(latest, S) ? '' : 'calculated.js trên máy chủ đã khác bản trang đang dùng (có giao dịch hoặc chỉnh sửa mới). Tải lại trang rồi tính lại.';
   }
@@ -516,14 +515,26 @@
     return '';
   }
 
-  /** Lưu dấu "đã sao chép giao dịch này"; trả false nếu trình duyệt không cho lưu. */
+  /**
+   * Lưu dấu "đã sao chép giao dịch này".
+   * @returns {'new'|'same'|'other'|'fail'} new: vừa tạo; same: đã có đúng dấu này từ trước;
+   *   other: đã có dấu của giao dịch khác (tab khác vừa sao chép); fail: trình duyệt không cho lưu.
+   */
   function saveExpected(kind) {
     try {
       const v = JSON.stringify(exports[kind]);
+      const existing = localStorage.getItem(EXPECT_KEY);
+      if (existing === v) return 'same';
+      if (existing && pendingCopyProblem()) return 'other';
       localStorage.setItem(EXPECT_KEY, v);
-      return localStorage.getItem(EXPECT_KEY) === v;
-    } catch (e) { return false; }
+      return localStorage.getItem(EXPECT_KEY) === v ? 'new' : 'fail';
+    } catch (e) { return 'fail'; }
   }
+
+  /** Chạy fn độc quyền giữa các tab (Web Locks) để hai tab không cùng lúc qua kiểm tra rồi cùng lưu dấu. */
+  const withCopyLock = (fn) => (navigator.locks && navigator.locks.request
+    ? navigator.locks.request(`${KEY_PREFIX}copy`, fn)
+    : fn());
 
   function markCopied(kind) {
     copiedKind = kind;
@@ -544,18 +555,23 @@
     const id = reqId[kind];
     const text = pre.textContent;
     let refusal = null;
-    let saved = false;
+    let savedNew = false;
     status.textContent = 'Đang kiểm tra calculated.js mới nhất…';
     // Kiểm tra lại máy chủ ngay lúc sao chép: từ lúc tính tới giờ có thể đã có giao dịch ở máy khác.
     const checked = (async () => {
       const stale = await latestLedgerProblem();
-      if (id !== reqId[kind]) refusal = { msg: '' };
-      else if (stale) refusal = { msg: stale, clear: true };
-      else if (copyBlocked(kind)) refusal = { msg: copyBlocked(kind) };
-      else if (expired(kind)) refusal = { msg: expiredMsg, clear: true };
-      else if (!(saved = saveExpected(kind))) {
-        refusal = { msg: 'Trình duyệt không lưu được dữ liệu trang (chế độ ẩn danh hoặc chặn lưu trữ), nên không bảo vệ được việc ghi đè. Mở bằng cửa sổ thường rồi thử lại.' };
-      }
+      await withCopyLock(async () => {
+        if (id !== reqId[kind]) refusal = { msg: '' };
+        else if (stale) refusal = { msg: stale, clear: true };
+        else if (copyBlocked(kind)) refusal = { msg: copyBlocked(kind) };
+        else if (expired(kind)) refusal = { msg: expiredMsg, clear: true };
+        else {
+          const r = saveExpected(kind);
+          savedNew = r === 'new';
+          if (r === 'other') refusal = { msg: pendingCopyProblem() || lockedMsg };
+          else if (r === 'fail') refusal = { msg: 'Trình duyệt không lưu được dữ liệu trang (chế độ ẩn danh hoặc chặn lưu trữ), nên không bảo vệ được việc ghi đè. Mở bằng cửa sổ thường rồi thử lại.' };
+        }
+      });
       if (refusal) throw new Error(refusal.msg);
       return text;
     })();
@@ -564,11 +580,16 @@
     try {
       if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
         await navigator.clipboard.write([new ClipboardItem({ 'text/plain': checked.then((t) => new Blob([t], { type: 'text/plain' })) })]);
-      } else {
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(await checked);
+      } else {
+        throw new Error('no clipboard');
       }
     } catch (e) {
-      if (saved) { try { localStorage.removeItem(EXPECT_KEY); } catch (err) {} }
+      // Chờ kiểm tra chạy xong hẳn rồi mới dọn, kẻo nó lưu dấu sau khi đã báo "chưa sao chép".
+      await checked.catch(() => {});
+      // Chỉ xoá dấu do chính lần bấm này tạo ra; dấu của lần sao chép thành công trước đó phải giữ.
+      if (savedNew) { try { localStorage.removeItem(EXPECT_KEY); } catch (err) {} }
       if (refusal) {
         if (refusal.clear) { clearTx(kind); txError(kind, refusal.msg); status.textContent = ''; } else status.textContent = refusal.msg;
         return;
@@ -717,7 +738,7 @@
     $('theme-toggle').addEventListener('click', () => {
       const next = current() === 'dark' ? 'light' : 'dark';
       root.dataset.theme = next;
-      try { localStorage.setItem(`theme:${window.location.pathname}`, next); } catch (e) {}
+      try { localStorage.setItem(`theme:${PAGE_PATH}`, next); } catch (e) {}
       sync();
     });
     // Safari < 14 chỉ có addListener.
@@ -734,6 +755,7 @@
   setupTheme();
   setupCurrency();
   showProblems();
+  renderHistory();
   setupTx();
   // calculated.js hỏng thì không có totalShares, vẽ giá sẽ ra NaN; khoá luôn nút cập nhật.
   $('refresh').disabled = !!loadError;

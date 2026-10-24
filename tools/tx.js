@@ -5,28 +5,35 @@
 //   node tools/tx.js rut "Cam" 500 --write   tính rồi ghi đè calculated.js
 //   node tools/tx.js rut "Cam" all --write   rút toàn bộ phần của Cam
 //
+// --write chỉ chạy khi chắc sổ trên máy là mới nhất (git đã pull, không chậm hơn remote). Chưa có
+// git/remote thì phải thêm --offline để xác nhận là cố ý ghi mà không đối chiếu được.
+//
 // Giá lấy trực tiếp từ Binance ngay lúc chạy; không lấy được giá thì dừng, không đoán.
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
 const F = require('../core.js');
-const { ROOT, CALC_FILE, readPortfolio, loadState } = require('./load.js');
+const { CALC_FILE, readPortfolio, loadState, git, isGitRepo } = require('./load.js');
 
 const fail = (msg) => { console.error(`Lỗi: ${msg}`); process.exit(1); };
 const pct = (n, d) => `${((n / d) * 100).toFixed(4)}%`;
-const USAGE = 'cú pháp: node tools/tx.js gop|rut "<tên cổ đông>" <số tiền USDT | all> [--write]';
+const USAGE = 'cú pháp: node tools/tx.js gop|rut "<tên cổ đông>" <số tiền USDT | all> [--write] [--offline]';
 
-/** Cảnh báo nếu nhánh hiện tại đang sau remote (chưa git pull) hoặc calculated.js chưa commit. */
-function gitWarnings() {
-  const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  const out = [];
-  try { git('rev-parse', '--is-inside-work-tree'); } catch (e) { return ['Thư mục chưa là git repo: không đối chiếu được với bản trên GitHub.']; }
+/**
+ * Kiểm tra sổ trên máy có phải mới nhất không. Trả về { blockers, warnings }: blockers chặn --write
+ * (tính trên sổ cũ sẽ làm mất giao dịch đã dán từ trang web), warnings chỉ để báo.
+ */
+function gitCheck() {
+  if (!isGitRepo()) return { blockers: ['Thư mục chưa là git repo, không đối chiếu được với bản trên GitHub.'], warnings: [] };
+  const blockers = [];
+  const warnings = [];
   try {
     git('fetch', '--quiet');
     const behind = Number(git('rev-list', '--count', 'HEAD..@{u}'));
-    if (behind > 0) out.push(`Nhánh đang sau remote ${behind} commit: chạy git pull trước, nếu không sẽ tính trên sổ cũ.`);
-  } catch (e) { out.push('Không kiểm tra được remote (chưa có upstream hoặc mất mạng).'); }
-  try { if (git('status', '--porcelain', '--', 'calculated.js')) out.push('calculated.js đang có thay đổi chưa commit.'); } catch (e) { /* bỏ qua */ }
-  return out;
+    if (behind > 0) blockers.push(`Nhánh đang sau remote ${behind} commit: chạy git pull trước, nếu không sẽ tính trên sổ cũ.`);
+  } catch (e) {
+    blockers.push('Không kiểm tra được remote (chưa có upstream, mất mạng, hoặc cần đăng nhập).');
+  }
+  try { if (git('status', '--porcelain', '--', 'calculated.js')) warnings.push('calculated.js đang có thay đổi chưa commit.'); } catch (e) { /* bỏ qua */ }
+  return { blockers, warnings };
 }
 
 /**
@@ -50,7 +57,8 @@ function writeLedger(base, next) {
 async function main() {
   const args = process.argv.slice(2);
   const write = args.includes('--write');
-  const unknownFlags = args.filter((a) => a.startsWith('--') && a !== '--write');
+  const offline = args.includes('--offline');
+  const unknownFlags = args.filter((a) => a.startsWith('--') && !['--write', '--offline'].includes(a));
   const positional = args.filter((a) => !a.startsWith('--'));
   if (unknownFlags.length) fail(`không hiểu ${unknownFlags.join(' ')}. ${USAGE}`);
   // Thừa tham số thường là số tiền bị tách bởi dấu cách ("1 000"); dừng thay vì lấy mỗi phần đầu.
@@ -58,7 +66,10 @@ async function main() {
   const [kind, name, amountArg] = positional;
   if (!['gop', 'rut'].includes(kind)) fail(USAGE);
 
-  gitWarnings().forEach((w) => console.warn(`Cảnh báo: ${w}`));
+  const { blockers, warnings } = gitCheck();
+  warnings.forEach((w) => console.warn(`Cảnh báo: ${w}`));
+  blockers.forEach((w) => console.warn(`${write && !offline ? 'Chặn' : 'Cảnh báo'}: ${w}`));
+  if (write && blockers.length && !offline) fail('không ghi vì chưa chắc sổ trên máy là mới nhất. Xử lý cảnh báo trên, hoặc thêm --offline nếu cố ý ghi mà không đối chiếu.');
 
   const S = loadState();
   const problems = F.validate(S);
