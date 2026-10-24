@@ -29,7 +29,13 @@ như một công ty cổ phần, định giá theo giá Binance, và tính góp/
 - `validate()` tự kiểm tra: cổ phần từng người = `initialShares` cộng trừ `history`, mỗi dòng lịch sử tính
   lại ra đúng số cổ phần, `units` khớp `portfolio.js`. Sai là trang khoá góp/rút và CLI dừng.
 
-## Khi được nhờ ghi một giao dịch góp/rút
+## Lệnh tắt `/cmd`
+
+`/cmd gop 1000 cam`, `/cmd rut 500 cam`, `/cmd rut all cam`: skill ở `.claude/skills/cmd/SKILL.md`. Lệnh do
+người dùng gõ là sự đồng ý: ghi, commit và push thẳng lên `main` không hỏi lại, nhưng dừng và hỏi khi có bất
+thường (xem skill).
+
+## Khi được nhờ ghi một giao dịch góp/rút (không qua `/cmd`)
 
 1. `git pull` (sổ mới nhất có thể vừa được dán từ trang web), rồi `npm test`, phải qua hết.
 2. Xem trước: `node tools/tx.js gop "<tên>" <số tiền>` (hoặc `rut ... <số tiền|all>`). Tên phải khớp đúng

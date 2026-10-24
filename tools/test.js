@@ -495,3 +495,21 @@ describe('calculated.js thật', () => {
   });
   test('portfolio.js thật dùng được với core', () => assert.ok(Array.isArray(readPortfolio().assets)));
 });
+
+describe('findHolder', () => {
+  test('gõ tắt không dấu, không phân biệt hoa thường', () => {
+    const s = state0();
+    assert.equal(F.findHolder(s, 'cam').index, 1);
+    assert.equal(F.findHolder(s, 'ben tre').index, 2);
+    assert.equal(F.findHolder(s, 'TOC  VANG HOE').index, 3);
+    assert.equal(F.findHolder(s, 'chau gai de thuong').index, 4);
+    assert.equal(F.findHolder(s, 'Bến Tre').index, 2);
+  });
+  test('không ai hoặc nhiều người khớp thì báo lỗi, không đoán', () => {
+    const s = state0();
+    assert.ok(F.findHolder(s, 'ca').error, 'không khớp một phần tên');
+    s.shareholders.push({ name: 'Cẩm', shares: 0 });
+    assert.ok(F.findHolder(s, 'cam').error, 'Cam và Cẩm cùng thành "cam"');
+    assert.equal(F.findHolder(s, 'Cẩm').index, 5, 'gõ đúng có dấu thì vẫn được');
+  });
+});

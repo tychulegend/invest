@@ -147,6 +147,25 @@
 
   const cashAsset = (state) => state.assets.find((a) => a.id === state.contributionAsset);
 
+  /** Bỏ dấu, chữ thường, gộp khoảng trắng: "Bến  Tre" -> "ben tre". */
+  const foldName = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().trim().replace(/\s+/g, ' ');
+
+  /**
+   * Tìm cổ đông theo tên gõ tắt: khớp đúng trước, rồi khớp không dấu/không phân biệt hoa thường.
+   * Không đoán khi mơ hồ: trùng nhiều người hoặc không ai thì trả lỗi.
+   * @returns {{index: number}|{error: string}}
+   */
+  function findHolder(state, query) {
+    const exact = state.shareholders.findIndex((h) => h.name === query);
+    if (exact >= 0) return { index: exact };
+    const q = foldName(query);
+    const hits = state.shareholders.map((h, i) => [foldName(h.name), i]).filter(([n]) => n === q);
+    if (hits.length === 1) return { index: hits[0][1] };
+    const list = state.shareholders.map((h) => h.name).join(', ');
+    return { error: hits.length ? `Tên "${query}" khớp nhiều cổ đông, gõ đúng tên có dấu. Danh sách: ${list}` : `Không có cổ đông tên "${query}". Danh sách: ${list}` };
+  }
+
   /**
    * Kiểm tra cấu hình và calculated.js có hợp lệ không trước khi cho tính giao dịch.
    * @returns {string[]} danh sách lỗi, rỗng nếu ổn
@@ -472,6 +491,6 @@ ${history.join('\n')}
     UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchWithTimeout, fetchPrices,
     parseAmount, merge, validate, valuation,
     sharesForGop, sharesForRut, payoutForAll, historyEntryValid, replayShares,
-    planTx, applyTx, prepareTx, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset,
+    planTx, applyTx, prepareTx, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,
   };
 }));

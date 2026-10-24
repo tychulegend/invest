@@ -75,8 +75,10 @@ async function main() {
   const problems = F.validate(S);
   if (problems.length) fail(`calculated.js có vấn đề:\n  - ${problems.join('\n  - ')}`);
 
-  const who = S.shareholders.findIndex((h) => h.name === name);
-  if (who < 0) fail(`không có cổ đông tên "${name}". Danh sách: ${S.shareholders.map((h) => h.name).join(', ')}`);
+  // Nhận tên gõ tắt không dấu (cam, ben tre); mơ hồ thì dừng, không đoán.
+  const found = F.findHolder(S, name);
+  if (found.error) fail(found.error);
+  const who = found.index;
 
   const all = amountArg === 'all';
   if (all && kind !== 'rut') fail('"all" chỉ dùng cho rút.');
