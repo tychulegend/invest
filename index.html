@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sổ cổ phần gia đình</title>
+  <meta name="description" content="Danh mục đầu tư của gia đình, quy ra cổ phần và định giá theo thời gian thực.">
+  <script>
+    // Áp theme trước khi render để không bị nháy màu.
+    try {
+      const t = localStorage.getItem('theme:' + location.pathname);
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:wght@500;700&family=Be+Vietnam+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div>
+        <h1 class="fund-name" id="fund-name">Quỹ Đầu tư Gia đình</h1>
+        <p class="fund-meta" id="fund-meta">Đang tải giá…</p>
+      </div>
+      <div class="controls">
+        <div class="seg" id="currency-switch" role="group" aria-label="Đơn vị tiền hiển thị" hidden>
+          <button type="button" class="seg-btn" data-currency="USDT" aria-pressed="true">USDT</button>
+          <button type="button" class="seg-btn" data-currency="VND" aria-pressed="false">VNĐ</button>
+        </div>
+        <button type="button" class="btn" id="refresh">Cập nhật giá</button>
+        <button type="button" class="btn btn-icon" id="theme-toggle" aria-label="Đổi giao diện sáng/tối">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="data-problems" id="data-problems" role="alert" hidden></div>
+    <p class="notice" id="notice" role="status" hidden></p>
+
+    <section class="certificate" aria-labelledby="price-label">
+      <svg class="rosette" id="rosette" viewBox="-100 -100 200 200" aria-hidden="true"></svg>
+      <div class="cert-body">
+        <p class="cert-label" id="price-label">Giá trị mỗi cổ phần</p>
+        <p class="cert-price"><span id="share-price">–</span><span class="cert-unit" data-cur>USDT</span></p>
+        <p class="cert-change" id="share-change"></p>
+        <dl class="cert-facts">
+          <div><dt>Tổng tài sản ròng</dt><dd id="nav-total">–</dd></div>
+          <div><dt>Tổng số cổ phần</dt><dd id="shares-total">–</dd></div>
+          <div><dt>Giá 1.000 cổ phần</dt><dd id="price-1000">–</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <div class="split">
+      <section class="panel" aria-labelledby="alloc-title">
+        <h2 id="alloc-title">Cơ cấu tài sản</h2>
+        <div class="donut-wrap">
+          <svg class="donut" id="donut" viewBox="0 0 220 220" role="img" aria-label="Biểu đồ tỷ trọng tài sản"></svg>
+          <div class="donut-center" aria-hidden="true">
+            <span class="donut-center-value" id="donut-center">–</span>
+            <span class="donut-center-label" data-cur>USDT</span>
+          </div>
+          <div class="tooltip" id="tooltip" hidden></div>
+        </div>
+        <ul class="legend" id="legend"></ul>
+      </section>
+
+      <section class="panel" aria-labelledby="calc-title">
+        <h2 id="calc-title">Cách tính giá cổ phần</h2>
+        <table class="ledger" id="ledger"></table>
+      </section>
+    </div>
+
+    <section class="panel" aria-labelledby="holdings-title">
+      <h2 id="holdings-title">Chi tiết danh mục</h2>
+      <div class="assets" role="table" aria-labelledby="holdings-title">
+        <div class="asset asset-head" role="row">
+          <span class="cell c-name" role="columnheader">Tài sản</span>
+          <span class="cell c-qty" role="columnheader">Số lượng</span>
+          <span class="cell c-price" role="columnheader">Đơn giá (<span data-cur>USDT</span>)</span>
+          <span class="cell c-chg" role="columnheader">24 giờ</span>
+          <span class="cell c-value" role="columnheader">Giá trị (<span data-cur>USDT</span>)</span>
+          <span class="cell c-weight" role="columnheader">Tỷ trọng</span>
+          <span class="cell c-shares" role="columnheader">Cổ phần</span>
+        </div>
+        <div id="holdings" role="rowgroup"></div>
+        <div id="holdings-foot" role="rowgroup"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="holders-panel" aria-labelledby="holders-title" hidden>
+      <h2 id="holders-title">Sổ cổ đông</h2>
+      <div class="holders" role="table" aria-labelledby="holders-title">
+        <div class="holder holder-head" role="row">
+          <span class="cell h-name" role="columnheader">Cổ đông</span>
+          <span class="cell h-shares" role="columnheader">Số cổ phần</span>
+          <span class="cell h-pct" role="columnheader">Sở hữu</span>
+          <span class="cell h-value" role="columnheader">Giá trị (<span data-cur>USDT</span>)</span>
+        </div>
+        <div id="holders" role="rowgroup"></div>
+      </div>
+      <div id="history-wrap" hidden>
+        <h3 class="sub-title">Lịch sử góp và rút vốn</h3>
+        <ol class="history" id="history"></ol>
+      </div>
+    </section>
+
+    <section class="panel tx-panel" id="gop-panel" aria-labelledby="gop-title" hidden>
+      <h2 id="gop-title">Góp vốn</h2>
+      <p class="panel-lead">Người góp mua thêm cổ phần theo giá lúc bấm. Trang xuất ra nguyên file <code>calculated.js</code>; sao chép rồi dán đè toàn bộ file đó.</p>
+      <p class="contrib-base" data-base></p>
+
+      <form class="contrib-form" id="gop-form" autocomplete="off">
+        <label class="field">
+          <span>Người góp</span>
+          <span class="select">
+            <select id="gop-who"></select>
+            <svg class="select-arrow" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+        </label>
+        <label class="field">
+          <span>Số tiền góp (USDT)</span>
+          <input id="gop-amount" type="text" inputmode="decimal" placeholder="1000" autocomplete="off" aria-describedby="gop-hint">
+          <small class="field-hint" id="gop-hint" aria-live="polite"></small>
+        </label>
+        <button type="submit" class="btn btn-primary btn-calc" id="gop-calc">Tính cổ phần</button>
+      </form>
+      <p class="contrib-error" id="gop-error" role="alert" hidden></p>
+
+      <div id="gop-result" hidden>
+        <dl class="contrib-facts" id="gop-facts"></dl>
+        <div class="holders" role="table" aria-label="Sổ cổ đông trước và sau khi góp">
+          <div class="holder holder-head contrib-row" role="row">
+            <span class="cell h-name" role="columnheader">Cổ đông</span>
+            <span class="cell h-sb" role="columnheader">Cổ phần trước</span>
+            <span class="cell h-sa" role="columnheader">Cổ phần sau</span>
+            <span class="cell h-pb" role="columnheader">Sở hữu trước</span>
+            <span class="cell h-pa" role="columnheader">Sở hữu sau</span>
+          </div>
+          <div id="gop-rows" role="rowgroup"></div>
+        </div>
+        <div class="contrib-actions">
+          <button type="button" class="btn btn-primary" id="gop-copy">Sao chép calculated.js</button>
+          <span class="copy-status" id="gop-status" role="status"></span>
+        </div>
+        <pre class="snippet" id="gop-snippet"></pre>
+        <p class="contrib-note" id="gop-note"></p>
+      </div>
+    </section>
+
+    <section class="panel tx-panel" id="rut-panel" aria-labelledby="rut-title" hidden>
+      <h2 id="rut-title">Rút vốn</h2>
+      <p class="panel-lead">Người rút bán lại cổ phần cho quỹ theo giá lúc bấm và nhận tiền từ tiền mặt. Trang xuất ra nguyên file <code>calculated.js</code>; sao chép rồi dán đè toàn bộ file đó.</p>
+      <p class="contrib-base" data-base></p>
+
+      <form class="contrib-form" id="rut-form" autocomplete="off">
+        <label class="field">
+          <span>Người rút</span>
+          <span class="select">
+            <select id="rut-who"></select>
+            <svg class="select-arrow" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+        </label>
+        <label class="field">
+          <span>Số tiền rút (USDT)</span>
+          <input id="rut-amount" type="text" inputmode="decimal" placeholder="500" autocomplete="off" aria-describedby="rut-hint">
+          <small class="field-hint" id="rut-hint" aria-live="polite"></small>
+        </label>
+        <button type="submit" class="btn btn-primary btn-calc" id="rut-calc">Tính cổ phần</button>
+        <label class="check">
+          <input type="checkbox" id="rut-all">
+          <span>Rút toàn bộ phần của người này</span>
+        </label>
+      </form>
+      <p class="contrib-error" id="rut-error" role="alert" hidden></p>
+
+      <div id="rut-result" hidden>
+        <dl class="contrib-facts" id="rut-facts"></dl>
+        <div class="holders" role="table" aria-label="Sổ cổ đông trước và sau khi rút">
+          <div class="holder holder-head contrib-row" role="row">
+            <span class="cell h-name" role="columnheader">Cổ đông</span>
+            <span class="cell h-sb" role="columnheader">Cổ phần trước</span>
+            <span class="cell h-sa" role="columnheader">Cổ phần sau</span>
+            <span class="cell h-pb" role="columnheader">Sở hữu trước</span>
+            <span class="cell h-pa" role="columnheader">Sở hữu sau</span>
+          </div>
+          <div id="rut-rows" role="rowgroup"></div>
+        </div>
+        <div class="contrib-actions">
+          <button type="button" class="btn btn-primary" id="rut-copy">Sao chép calculated.js</button>
+          <span class="copy-status" id="rut-status" role="status"></span>
+        </div>
+        <pre class="snippet" id="rut-snippet"></pre>
+        <p class="contrib-note" id="rut-note"></p>
+      </div>
+    </section>
+
+    <footer class="footnote">
+      <p>Giá lấy từ Binance (BTC/USDT, XAUT/USDT), tự cập nhật mỗi phút. Vàng định giá theo XAUT (Tether Gold), tương đương 1 troy ounce vàng thế giới. Tiền mặt tính 1 USDT = 1. Khi xem bằng VNĐ, số tiền được quy đổi theo tỷ giá tự nhập trong portfolio.js (<span id="rate-note"></span>); góp/rút và lịch sử luôn ghi bằng USDT.</p>
+    </footer>
+  </div>
+
+  <script>
+    // Luôn tải bản mới nhất: tính góp vốn trên calculated.js cũ (còn trong cache trình duyệt
+    // hoặc GitHub Pages) sẽ ghi đè mất lần góp trước. async=false giữ đúng thứ tự chạy.
+    ['core.js', 'portfolio.js', 'calculated.js', 'app.js'].forEach((src) => {
+      const s = document.createElement('script');
+      s.src = `${src}?v=${Date.now()}`;
+      s.async = false;
+      document.body.appendChild(s);
+    });
+  </script>
+</body>
+</html>

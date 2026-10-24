@@ -1,0 +1,52 @@
+# Kiểm tra sổ rồi mới đăng lên GitHub Pages. Nếu test đỏ (vd dán một calculated.js tính trên sổ cũ,
+# làm mất giao dịch đã ghi) thì không deploy, trang công khai giữ nguyên bản đúng gần nhất.
+# Cần bật: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Kiểm tra sổ và đăng trang
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Không cho hai lần deploy chạy chồng nhau; lần sau chờ lần trước xong.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: npm test (kèm kiểm tra lịch sử chỉ nối thêm so với trước lần push)
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then BEFORE="$(git rev-parse HEAD~1 2>/dev/null || true)"; fi
+          if [ -n "$BEFORE" ]; then export FUND_BASE_REF="$BEFORE"; fi
+          echo "So lịch sử với: ${FUND_BASE_REF:-HEAD}"
+          npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v5
