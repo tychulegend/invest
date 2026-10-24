@@ -150,6 +150,8 @@
       name: portfolio.name,
       contributionAsset: portfolio.contributionAsset || 'cash',
       initialShares: portfolio.initialShares,
+      rebalanceBandPct: portfolio.rebalanceBandPct,
+      rebalanceMinUsdt: portfolio.rebalanceMinUsdt,
       units: C.units && typeof C.units === 'object' ? { ...C.units } : undefined,
       updatedAt: C.updatedAt,
       totalShares: C.totalShares,
@@ -463,7 +465,7 @@
     if (side !== 'ban' && side !== 'mua') return { error: `Loại giao dịch không hợp lệ: ${side}.` };
     const asset = state.assets.find((a) => a.id === assetId);
     const cash = cashAsset(state);
-    if (!asset) return { error: `Không có tài sản "${assetId}". Có: ${state.assets.map((a) => a.id).join(', ')}.` };
+    if (!asset) return { error: `Không có tài sản "${assetId}". Có: ${assetIdList(state)}.` };
     if (asset.id === cash.id) return { error: 'Không mua bán chính tiền mặt.' };
     if (!(isInt(qtyUnits) && qtyUnits > 0)) return { error: 'Số lượng không hợp lệ.' };
     if (!(isInt(cents) && cents > 0)) return { error: 'Số tiền không hợp lệ.' };
@@ -500,62 +502,186 @@
   }
 
   /**
-   * Kiểm tra tỷ trọng mục tiêu trong portfolio.js: mỗi tài sản một con số % không âm, tổng đúng 100.
+   * Bảng tên gọi của từng tài sản: id, ticker, tên (đã bỏ dấu). Một tên gọi trỏ tới nhiều tài sản thì
+   * giữ cả danh sách để báo mơ hồ, không để tài sản sau âm thầm đè tài sản trước.
+   * @returns {Map<string, string[]>}
+   */
+  function assetAliases(state) {
+    const map = new Map();
+    state.assets.forEach((a) => {
+      new Set([a.id, a.ticker, a.name].filter(Boolean).map(foldName)).forEach((n) => {
+        map.set(n, [...(map.get(n) || []), a.id]);
+      });
+    });
+    return map;
+  }
+
+  const assetIdList = (state) => state.assets.map((a) => a.id).join(', ');
+
+  /**
+   * Tìm tài sản: khớp đúng id trước (id luôn duy nhất), rồi tới ticker hoặc tên không phân biệt dấu/hoa
+   * thường (vd "vàng", "xaut", "tiền mặt"). Mơ hồ hoặc không có thì báo lỗi, không đoán.
+   * @param {Map<string, string[]>} [aliases] truyền vào để khỏi dựng lại khi tra nhiều lần
+   * @returns {{id: string}|{error: string}}
+   */
+  function findAsset(state, query, aliases = assetAliases(state)) {
+    const exact = state.assets.find((a) => a.id === query) || state.assets.find((a) => a.id.toLowerCase() === String(query).toLowerCase());
+    if (exact) return { id: exact.id };
+    const ids = aliases.get(foldName(query)) || [];
+    if (ids.length === 1) return { id: ids[0] };
+    return { error: ids.length ? `"${query}" khớp nhiều tài sản (${ids.join(', ')}), gõ đúng id.` : `Không hiểu tài sản "${query}". Có: ${assetIdList(state)}.` };
+  }
+
+  /**
+   * Kiểm tra tỷ trọng mục tiêu: mỗi tài sản một con số % không âm, tổng đúng 100.
+   * @param {Map<string, number>} targets
    * @returns {string[]} danh sách lỗi
    */
   function validateTargets(state, targets) {
-    if (!targets || typeof targets !== 'object') return ['portfolio.js chưa có targetWeights (tỷ trọng mục tiêu, vd { btc: 70, gold: 20, cash: 10 }).'];
+    if (!targets || typeof targets !== 'object') return ['Chưa có tỷ trọng mục tiêu, vd: btc 40 gold 40 cash 20.'];
+    if (!(targets instanceof Map)) targets = new Map(Object.entries(targets));
     const errs = [];
-    Object.keys(targets).forEach((id) => {
-      if (!state.assets.some((a) => a.id === id)) errs.push(`targetWeights có id không khai báo trong assets: ${id}.`);
+    [...targets.keys()].forEach((id) => {
+      if (!state.assets.some((a) => a.id === id)) errs.push(`Tỷ trọng có tài sản không khai báo trong portfolio.js: ${id}.`);
     });
     state.assets.forEach((a) => {
-      const w = targets[a.id];
-      if (!(typeof w === 'number' && Number.isFinite(w) && w >= 0)) errs.push(`targetWeights.${a.id} phải là số % không âm (đang là ${JSON.stringify(w)}).`);
+      const w = targets.get(a.id);
+      if (!isMoney(w)) {
+        errs.push(w === undefined ? `Thiếu tỷ trọng cho ${a.id}.` : `Tỷ trọng của ${a.id} phải là số % không âm (đang là ${JSON.stringify(w)}).`);
+      }
     });
-    const sum = state.assets.reduce((t, a) => t + (Number.isFinite(targets[a.id]) ? targets[a.id] : 0), 0);
-    if (Math.abs(sum - 100) > 1e-9) errs.push(`Tổng targetWeights phải đúng 100%, đang là ${sum}%.`);
+    const sum = state.assets.reduce((t, a) => t + (Number.isFinite(targets.get(a.id)) ? targets.get(a.id) : 0), 0);
+    if (Math.abs(sum - 100) > 1e-9) errs.push(`Tổng tỷ trọng phải đúng 100%, đang là ${+sum.toFixed(6)}%.`);
     return errs;
+  }
+
+  /**
+   * Đọc tỷ trọng mục tiêu gõ trong lệnh, vd "btc 40 gold 40 cash 20" (thứ tự tuỳ ý, có thể kèm % hay dấu phẩy
+   * phân cách). Tên tài sản ưu tiên khớp dài nhất (tới số chữ của tên dài nhất), nên tên có chữ số như
+   * "Vàng 9999" vẫn dùng được. Tỷ trọng không thể quá 100% nên "33.333" hay "1,5" luôn là số thập phân.
+   * @returns {{targets: Map<string, number>}|{error: string}}
+   */
+  function parseTargets(state, tokens) {
+    const words = tokens.flatMap((t) => String(t).split(/\s+/))
+      .map((w) => w.replace(/^,+|,+$/g, ''))
+      .filter((w) => w && w !== '%');
+    if (!words.length) return { error: 'Chưa nêu tỷ trọng, vd: btc 40 gold 40 cash 20.' };
+    const aliases = assetAliases(state);
+    const maxWords = Math.max(1, ...[...aliases.keys()].map((n) => n.split(' ').length));
+    const NUM = /^-?\d+([.,]\d+)?%?$/;
+    const targets = new Map();
+    const errs = [];
+    let i = 0;
+    while (i < words.length) {
+      // Thử ghép nhiều chữ nhất có thể thành một tên tài sản đã biết, rồi mới tới con số %.
+      let end = -1;
+      for (let j = Math.min(words.length - 1, i + maxWords - 1); j >= i; j--) {
+        const name = words.slice(i, j + 1).join(' ');
+        if (aliases.has(foldName(name))) { end = j; break; }
+      }
+      if (end < 0) {
+        let j = i;
+        while (j < words.length && !NUM.test(words[j])) j++;
+        errs.push(`Không hiểu tài sản "${words.slice(i, Math.max(j, i + 1)).join(' ')}". Có: ${assetIdList(state)}.`);
+        i = j + 1;
+        continue;
+      }
+      const name = words.slice(i, end + 1).join(' ');
+      const raw = words[end + 1];
+      if (raw === undefined || !NUM.test(raw)) { errs.push(`"${name}" thiếu số %.`); i = end + 1; continue; }
+      i = end + 2;
+      const found = findAsset(state, name, aliases);
+      if (found.error) { errs.push(found.error); continue; }
+      if (targets.has(found.id)) { errs.push(`"${name}" bị nêu hai lần.`); continue; }
+      targets.set(found.id, parseFloat(raw.replace('%', '').replace(',', '.')));
+    }
+    if (errs.length) return { error: errs.join(' ') };
+    const bad = validateTargets(state, targets);
+    return bad.length ? { error: bad.join(' ') } : { targets };
   }
 
   /**
    * Khuyến nghị cân bằng danh mục về tỷ trọng mục tiêu theo giá hiện tại. Chỉ là gợi ý, không ghi sổ:
    * mua/bán thật xong thì ghi bằng prepareTrade với số thực nhận/thực trả.
-   * Lệch nhỏ hơn bandPct (điểm %) so với mục tiêu thì "giữ", để khỏi mua bán lắt nhắt tốn phí.
-   * @returns {{error: string}|{rows: object[], nav: number}}
+   *
+   * - Lệch nhỏ hơn bandPct (điểm %) so với mục tiêu, hoặc khoản mua/bán nhỏ hơn minTradeUsdt (mức tối thiểu
+   *   của sàn), thì "giữ", để khỏi mua bán lắt nhắt tốn phí.
+   * - Tiền tính bằng cent nguyên, số lượng bằng đơn vị 1e-8, mọi phép làm tròn đều hướng về phía an toàn:
+   *   phần lệch so với mục tiêu làm tròn về 0; bán làm tròn số lượng xuống và tiền thu xuống; mua làm tròn số
+   *   lượng xuống và tiền trả lên. Nhờ vậy không bao giờ khuyến nghị bán quá mức cần, và tiền mặt sau khuyến
+   *   nghị (= hiện có + tiền bán − tiền mua) không bao giờ âm.
+   * - Không đủ tiền cho mọi khoản mua (vd có tài sản được giữ) thì thu nhỏ các khoản mua theo cùng tỷ lệ;
+   *   `limited` chỉ bật khi thiếu thật, không bật vì chênh lệch làm tròn vài cent.
+   * @param {Map<string, number>} targets
+   * @returns {{error: string}|{rows: object[], nav: number, bandPct: number, minTradeUsdt: number,
+   *   cashAfter: number, cashTarget: number, buyScale: number, limited: boolean}}
    */
-  function rebalancePlan(state, val, targets, { bandPct = 1 } = {}) {
+  function rebalancePlan(state, val, targets, { bandPct = 1, minTradeUsdt = 5 } = {}) {
     if (!val || !val.complete) return { error: 'Thiếu giá của ít nhất một tài sản, chưa tính được.' };
+    if (!isMoney(bandPct)) {
+      return { error: `Ngưỡng giữ nguyên (rebalanceBandPct) phải là số không âm, đang là ${JSON.stringify(bandPct)}.` };
+    }
+    if (!isMoney(minTradeUsdt)) {
+      return { error: `Mức mua/bán tối thiểu (rebalanceMinUsdt) phải là số không âm, đang là ${JSON.stringify(minTradeUsdt)}.` };
+    }
     const bad = validateTargets(state, targets);
     if (bad.length) return { error: bad.join(' ') };
+    if (!(targets instanceof Map)) targets = new Map(Object.entries(targets));
     if (!(val.nav > 0)) return { error: 'Tổng tài sản bằng 0, không có gì để cân bằng.' };
+    const minCents = Math.round(minTradeUsdt * 100);
     const cash = cashAsset(state);
     const rows = val.rows.map((r) => {
-      const targetPct = targets[r.id];
+      const targetPct = targets.get(r.id);
       const targetValue = (val.nav * targetPct) / 100;
-      const diffValue = targetValue - r.value;
       const drift = r.weight * 100 - targetPct;
       const isCash = r.id === cash.id;
+      const raw = targetValue - r.value;
+      // Phần cần mua/bán, làm tròn về 0 tới cent: không bao giờ vượt mức lý tưởng.
+      const needCents = Math.floor(Math.abs(raw) * 100 + EPS);
       let action = 'giu';
-      if (!isCash && Math.abs(drift) >= bandPct && r.unitPrice > 0) action = diffValue > 0 ? 'mua' : 'ban';
-      // Số lượng làm tròn xuống tới 1e-8 để không khuyến nghị bán nhiều hơn đang có.
-      const qty = action === 'giu' ? 0 : Math.floor((Math.abs(diffValue) / r.unitPrice) * QTY_SCALE) / QTY_SCALE;
+      if (!isCash && Math.abs(drift) >= bandPct && r.unitPrice > 0 && needCents >= Math.max(1, minCents)) action = raw > 0 ? 'mua' : 'ban';
       return {
-        id: r.id,
-        name: r.name,
-        unit: r.unit,
-        isCash,
-        action,
-        qty,
-        usdt: action === 'giu' ? 0 : Math.abs(diffValue),
-        currentValue: r.value,
-        currentPct: r.weight * 100,
-        targetPct,
-        targetValue,
-        drift,
+        id: r.id, name: r.name, unit: r.unit, unitPrice: r.unitPrice, isCash, action, needCents,
+        qty: 0, cents: 0, currentValue: r.value, currentPct: r.weight * 100, targetPct, targetValue, drift,
       };
     });
-    return { rows, nav: val.nav, bandPct };
+    const unitsFor = (cents, price) => Math.floor((cents / 100 / price) * QTY_SCALE + EPS);
+    const hold = (x) => { x.action = 'giu'; x.qty = 0; x.cents = 0; };
+    // Bán: số lượng làm tròn xuống, không vượt số đang có; tiền thu làm tròn xuống.
+    rows.filter((x) => x.action === 'ban').forEach((x) => {
+      const have = toQtyUnits(state.assets.find((a) => a.id === x.id).amount);
+      const units = x.targetPct === 0 ? have : Math.min(have, unitsFor(x.needCents, x.unitPrice));
+      x.qty = units / QTY_SCALE;
+      x.cents = Math.floor((units * x.unitPrice * 100) / QTY_SCALE);
+      if (units === 0 || x.cents < minCents) hold(x);
+    });
+    const cashRow = rows.find((x) => x.isCash);
+    const sellCents = rows.filter((x) => x.action === 'ban').reduce((t, x) => t + x.cents, 0);
+    const availableCents = toCents(cashRow.currentValue) + sellCents;
+    const buyRows = rows.filter((x) => x.action === 'mua');
+    const wantCents = buyRows.reduce((t, x) => t + x.needCents, 0);
+    const buyScale = wantCents > availableCents ? availableCents / wantCents : 1;
+    // Thiếu thật (vd có tài sản được giữ) khác với hụt vài cent do làm tròn tiền bán xuống.
+    const roundingSlack = rows.filter((x) => x.action === 'ban' || x.action === 'mua')
+      .reduce((t, x) => t + Math.ceil((x.unitPrice * 100) / QTY_SCALE) + 1, 1);
+    const limited = wantCents - availableCents > roundingSlack;
+    // Mua: ngân sách mỗi khoản làm tròn xuống tới cent, số lượng làm tròn xuống, tiền trả làm tròn lên.
+    buyRows.forEach((x) => {
+      const budget = Math.floor(x.needCents * buyScale);
+      const costOf = (u) => Math.ceil((u * x.unitPrice * 100) / QTY_SCALE - EPS);
+      let units = unitsFor(budget, x.unitPrice);
+      while (units > 0 && costOf(units) > budget) units--;
+      x.qty = units / QTY_SCALE;
+      x.cents = costOf(units);
+      if (units === 0 || x.cents < minCents) hold(x);
+    });
+    const spentCents = rows.filter((x) => x.action === 'mua').reduce((t, x) => t + x.cents, 0);
+    rows.forEach((x) => { x.usdt = x.cents / 100; });
+    return {
+      rows, nav: val.nav, bandPct, minTradeUsdt, buyScale, limited,
+      cashAfter: (availableCents - spentCents) / 100,
+      cashTarget: cashRow.targetValue,
+    };
   }
 
   /* ---------- xuất / so sánh sổ ---------- */
@@ -632,6 +758,6 @@ ${trades.join('\n')}
     UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchWithTimeout, fetchPrices,
     parseAmount, merge, validate, valuation,
     sharesForGop, sharesForRut, payoutForAll, historyEntryValid, replayShares,
-    planTx, applyTx, prepareTx, parseQty, prepareTrade, validateTargets, rebalancePlan, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,
+    planTx, applyTx, prepareTx, parseQty, prepareTrade, findAsset, validateTargets, parseTargets, rebalancePlan, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,
   };
 }));

@@ -563,31 +563,289 @@ describe('cân bằng danh mục', () => {
     const c = structuredClone(START);
     c.amounts = { btc: 1.12639625, gold: 0, cash: 0 };
     const s = F.merge(PORTFOLIO, c);
-    const r = F.rebalancePlan(s, F.valuation(s, prices), { btc: 70, gold: 20, cash: 10 });
+    const r = F.rebalancePlan(s, F.valuation(s, prices), new Map(Object.entries({ btc: 70, gold: 20, cash: 10 })));
     const by = Object.fromEntries(r.rows.map((x) => [x.id, x]));
     assert.equal(by.btc.action, 'ban');
     assert.equal(by.gold.action, 'mua');
     assert.equal(by.cash.action, 'giu');
     const nav = 1.12639625 * 80000;
-    assert.ok(Math.abs(by.btc.usdt - (nav - nav * 0.7)) < 1e-6);
-    assert.ok(Math.abs(by.gold.usdt - nav * 0.2) < 1e-6);
-    // Tiền bán BTC trừ tiền mua vàng đúng bằng phần tiền mặt mục tiêu.
-    assert.ok(Math.abs(by.btc.usdt - by.gold.usdt - by.cash.targetValue) < 1e-6);
-    assert.ok(by.btc.qty <= by.btc.usdt / 80000, 'không khuyến nghị bán nhiều hơn cần');
+    // Số lượng làm tròn xuống tới 1e-8 và tiền làm tròn theo cent, nên lệch lý tưởng tối đa vài cent.
+    assert.ok(Math.abs(by.btc.usdt - (nav - nav * 0.7)) <= 0.02, `bán ${by.btc.usdt}`);
+    assert.ok(Math.abs(by.gold.usdt - nav * 0.2) <= 0.02, `mua ${by.gold.usdt}`);
+    // Tiền mặt sau đúng từng cent bằng tiền bán trừ tiền mua, và sát phần tiền mặt mục tiêu.
+    assert.equal(F.toCents(r.cashAfter), F.toCents(by.btc.usdt) - F.toCents(by.gold.usdt));
+    assert.ok(Math.abs(r.cashAfter - by.cash.targetValue) <= 0.03);
+    assert.ok(by.btc.qty * 80000 <= nav - nav * 0.7 + 1e-9, 'không khuyến nghị bán nhiều hơn cần');
   });
   test('lệch dưới ngưỡng thì giữ', () => {
     const s = state0();
     const v = F.valuation(s, prices);
     const w = Object.fromEntries(v.rows.map((r) => [r.id, r.weight * 100]));
-    const r = F.rebalancePlan(s, v, w);
+    const r = F.rebalancePlan(s, v, new Map(Object.entries(w)));
     assert.ok(r.rows.every((x) => x.action === 'giu'));
   });
   test('tỷ trọng mục tiêu sai bị từ chối', () => {
     const s = state0();
     const v = F.valuation(s, prices);
     assert.ok(F.rebalancePlan(s, v, undefined).error);
-    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 20, cash: 5 }).error, 'tổng 95%');
-    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 30 }).error, 'thiếu cash');
-    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 20, cash: 10, eth: 0 }).error, 'id lạ');
+    assert.ok(F.rebalancePlan(s, v, new Map(Object.entries({ btc: 70, gold: 20, cash: 5 }))).error, 'tổng 95%');
+    assert.ok(F.rebalancePlan(s, v, new Map(Object.entries({ btc: 70, gold: 30 }))).error, 'thiếu cash');
+    assert.ok(F.rebalancePlan(s, v, new Map(Object.entries({ btc: 70, gold: 20, cash: 10, eth: 0 }))).error, 'id lạ');
+  });
+});
+
+describe('parseTargets', () => {
+  test('đọc tỷ trọng theo thứ tự tuỳ ý, tên có dấu/không dấu, "tiền mặt" hai chữ', () => {
+    const s = state0();
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['btc', '40', 'vàng', '40', 'cash', '20']).targets), { btc: 40, gold: 40, cash: 20 });
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['vang 45 BTC 45 tiền mặt 10']).targets), { gold: 45, btc: 45, cash: 10 });
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['xaut 30% bitcoin 60% usdt 10%']).targets), { gold: 30, btc: 60, cash: 10 });
+  });
+  test('thiếu tài sản, tổng khác 100, tên lạ, nêu hai lần, thiếu số: báo lỗi', () => {
+    const s = state0();
+    for (const bad of ['btc 40 vàng 40', 'btc 40 vàng 40 cash 30', 'btc 40 bac 40 cash 20', 'btc 40 vang 40 cash 20 btc 0', 'btc 40 vàng 40 cash', '']) {
+      assert.ok(F.parseTargets(s, [bad]).error, bad);
+    }
+  });
+});
+
+describe('cân bằng: các ca từ review', () => {
+  const prices = { BTCUSDT: { last: 100000, open: 100000 }, XAUTUSDT: { last: 4000, open: 4000 } };
+  test('có tài sản được giữ thì khoản mua không vượt tiền mặt; tiền mặt sau = có + bán − mua', () => {
+    const c = structuredClone(START);
+    c.amounts = { btc: 0.509, gold: 0, cash: 49100 };
+    const s = F.merge(PORTFOLIO, c);
+    const r = F.rebalancePlan(s, F.valuation(s, prices), new Map(Object.entries({ btc: 50, gold: 50, cash: 0 })));
+    const by = Object.fromEntries(r.rows.map((x) => [x.id, x]));
+    assert.equal(by.btc.action, 'giu', 'BTC lệch 0,9 điểm, dưới ngưỡng');
+    assert.ok(by.gold.usdt <= 49100 + 1e-6, `mua vàng ${by.gold.usdt} không vượt 49.100 tiền mặt`);
+    assert.ok(r.buyScale < 1);
+    assert.ok(r.cashAfter >= -1e-6 && Math.abs(r.cashAfter - (49100 - by.gold.usdt)) < 1e-6);
+    assert.ok(by.gold.qty * 4000 <= by.gold.usdt + 1e-9, 'số lượng mua làm tròn xuống');
+  });
+  test('số âm được báo đúng là số âm, không thành tên tài sản lạ', () => {
+    const e = F.parseTargets(state0(), ['btc -10 vang 90 cash 20']).error;
+    assert.ok(e && e.includes('không âm'), e);
+  });
+  test('dấu phẩy phân cách và % rời vẫn đọc được', () => {
+    assert.deepEqual(Object.fromEntries(F.parseTargets(state0(), ['btc 40, vàng 40, cash 20']).targets), { btc: 40, gold: 40, cash: 20 });
+    assert.deepEqual(Object.fromEntries(F.parseTargets(state0(), ['btc 40 % vang 40 % cash 20 %']).targets), { btc: 40, gold: 40, cash: 20 });
+  });
+  test('tên trùng giữa hai tài sản thì báo mơ hồ, không đè', () => {
+    const p = structuredClone(PORTFOLIO);
+    p.assets.push({ id: 'sjc', name: 'Vàng', ticker: 'SJC', unit: 'SJC', price: 1 });
+    const c = structuredClone(START);
+    c.amounts.sjc = 0;
+    c.units.sjc = 'SJC';
+    const s = F.merge(p, c);
+    assert.ok(F.findAsset(s, 'vàng').error.includes('nhiều tài sản'));
+    assert.equal(F.findAsset(s, 'gold').id, 'gold');
+    assert.ok(F.parseTargets(s, ['btc 40 vang 40 cash 20 sjc 0']).error);
+  });
+  test('tên có chữ số ("Vàng 9999") vẫn dùng được', () => {
+    const p = structuredClone(PORTFOLIO);
+    p.assets.find((a) => a.id === 'gold').name = 'Vàng 9999';
+    const s = F.merge(p, structuredClone(START));
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['vang 9999 40 btc 40 cash 20']).targets), { gold: 40, btc: 40, cash: 20 });
+  });
+  test('findAsset nhận id, ticker, tên có dấu/không dấu', () => {
+    const s = state0();
+    for (const q of ['gold', 'XAUT', 'vàng', 'Vang']) assert.equal(F.findAsset(s, q).id, 'gold', q);
+    assert.equal(F.findAsset(s, 'tiền mặt').id, 'cash');
+    assert.ok(F.findAsset(s, 'bac').error);
+  });
+});
+
+describe('cân bằng: tiền mặt và làm tròn (vòng review 2)', () => {
+  const T = (o) => new Map(Object.entries(o));
+  test('fuzz: có bán lẫn mua bị thu nhỏ, tiền mặt sau (tính theo cent, số lượng × giá) không bao giờ âm', () => {
+    const rand = rng(7);
+    const p = structuredClone(PORTFOLIO);
+    p.assets.splice(2, 0, { id: 'eth', name: 'Ethereum', ticker: 'ETH', unit: 'ETH', pair: 'ETHUSDT' });
+    let checked = 0;
+    for (let i = 0; i < 3000; i++) {
+      const c = structuredClone(START);
+      c.amounts = { btc: Math.floor(rand() * 2e8) / 1e8, gold: Math.floor(rand() * 20e8) / 1e8, eth: Math.floor(rand() * 30e8) / 1e8, cash: Math.floor(rand() * 2e6) / 100 };
+      c.units = { btc: 'BTC', gold: 'oz', eth: 'ETH', cash: 'USDT' };
+      const s = F.merge(p, c);
+      const prices = {
+        BTCUSDT: { last: 50000 + rand() * 60000, open: 1 },
+        XAUTUSDT: { last: 3000 + rand() * 2000, open: 1 },
+        ETHUSDT: { last: 1500 + rand() * 3000, open: 1 },
+      };
+      const v = F.valuation(s, prices);
+      if (!(v.nav > 0)) continue;
+      const w = [rand(), rand(), rand(), rand()];
+      const sum = w.reduce((a, b) => a + b, 0);
+      const pcts = w.map((x) => Math.round((x / sum) * 10000) / 100);
+      pcts[3] = Math.round((100 - pcts[0] - pcts[1] - pcts[2]) * 100) / 100;
+      if (pcts[3] < 0) continue;
+      const r = F.rebalancePlan(s, v, T({ btc: pcts[0], gold: pcts[1], eth: pcts[2], cash: pcts[3] }), { bandPct: rand() * 3 });
+      // Tỷ trọng hợp lệ, giá đủ, tổng tài sản dương: không được báo lỗi.
+      assert.ok(!r.error, r.error);
+      const priceOf = (id) => v.rows.find((x) => x.id === id).unitPrice;
+      let cash = F.toCents(F.cashAsset(s).amount);
+      for (const x of r.rows) {
+        const units = Math.round(x.qty * 1e8);
+        if (x.action === 'ban') {
+          assert.ok(units <= Math.round(s.assets.find((a) => a.id === x.id).amount * 1e8), 'không bán quá số đang có');
+          cash += Math.floor((units * priceOf(x.id) * 100) / 1e8);
+        }
+        if (x.action === 'mua') {
+          assert.ok(units > 0, 'mua thì phải có số lượng');
+          cash -= Math.ceil((units * priceOf(x.id) * 100) / 1e8);
+        }
+      }
+      assert.ok(cash >= 0, `tiền mặt sau âm: ${cash} cent (lần ${i})`);
+      assert.equal(F.toCents(r.cashAfter), cash, 'cashAfter khớp đúng từng cent');
+      checked++;
+    }
+    assert.ok(checked > 1000, `đủ nhiều ca (${checked})`);
+  });
+  test('khoản mua thu nhỏ còn 0 thì thành giữ, không in "mua 0"', () => {
+    // BTC và ETH mỗi thứ 50%, lệch 0,9 điểm nên được giữ; vàng muốn mua 1,8% nhưng không có tiền mặt nào.
+    const p = structuredClone(PORTFOLIO);
+    p.assets.splice(2, 0, { id: 'eth', name: 'Ethereum', ticker: 'ETH', unit: 'ETH', pair: 'ETHUSDT' });
+    const c = structuredClone(START);
+    c.amounts = { btc: 0.5, gold: 0, eth: 25, cash: 0 };
+    c.units = { btc: 'BTC', gold: 'oz', eth: 'ETH', cash: 'USDT' };
+    const s = F.merge(p, c);
+    const v = F.valuation(s, { BTCUSDT: { last: 100000, open: 1 }, XAUTUSDT: { last: 4000, open: 1 }, ETHUSDT: { last: 2000, open: 1 } });
+    const r = F.rebalancePlan(s, v, T({ btc: 49.1, eth: 49.1, gold: 1.8, cash: 0 }));
+    const by = Object.fromEntries(r.rows.map((x) => [x.id, x]));
+    assert.equal(by.btc.action, 'giu');
+    assert.equal(by.eth.action, 'giu');
+    assert.equal(by.gold.action, 'giu', 'không có tiền để mua thì giữ');
+    assert.equal(by.gold.qty, 0);
+    assert.equal(r.cashAfter, 0);
+  });
+  test('ngưỡng giữ nguyên sai kiểu bị từ chối', () => {
+    const s = state0();
+    const v = F.valuation(s, PRICES);
+    for (const band of ['1,5', NaN, -1, null]) assert.ok(F.rebalancePlan(s, v, T({ btc: 90, gold: 5, cash: 5 }), { bandPct: band }).error, String(band));
+  });
+  test('gõ đúng id vẫn được dù id trùng ticker của tài sản khác', () => {
+    const p = structuredClone(PORTFOLIO);
+    p.assets.splice(1, 0, { id: 'btc_cold', name: 'BTC ví lạnh', ticker: 'BTC', unit: 'BTC', pair: 'BTCUSDT' });
+    const c = structuredClone(START);
+    c.amounts.btc_cold = 0;
+    c.units.btc_cold = 'BTC';
+    const s = F.merge(p, c);
+    assert.equal(F.findAsset(s, 'btc').id, 'btc');
+    assert.equal(F.findAsset(s, 'btc_cold').id, 'btc_cold');
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['btc 30 btc_cold 30 gold 30 cash 10']).targets), { btc: 30, btc_cold: 30, gold: 30, cash: 10 });
+  });
+  test('chia đều 33.333 và tên dài hơn 4 chữ vẫn đọc được', () => {
+    assert.deepEqual(Object.fromEntries(F.parseTargets(state0(), ['btc 33.333 vang 33.333 cash 33.334']).targets), { btc: 33.333, gold: 33.333, cash: 33.334 });
+    const p = structuredClone(PORTFOLIO);
+    p.assets.find((a) => a.id === 'gold').name = 'Vàng nhẫn SJC 9999 Bảo Tín';
+    const s = F.merge(p, structuredClone(START));
+    assert.deepEqual(Object.fromEntries(F.parseTargets(s, ['vàng nhẫn sjc 9999 bảo tín 40 btc 40 cash 20']).targets), { gold: 40, btc: 40, cash: 20 });
+  });
+});
+
+describe('cân bằng: vòng review 3', () => {
+  const T = (o) => new Map(Object.entries(o));
+  test('gõ khớp kiểu bỏ dấu với id của một tài sản nhưng cũng là tên tài sản khác thì báo mơ hồ', () => {
+    const p = structuredClone(PORTFOLIO);
+    p.assets.push({ id: 'vang', name: 'Vàng SJC', ticker: 'SJC', unit: 'SJC', price: 1 });
+    const c = structuredClone(START);
+    c.amounts.vang = 0;
+    c.units.vang = 'SJC';
+    const s = F.merge(p, c);
+    assert.ok(F.findAsset(s, 'Vàng').error, '"Vàng" vừa là tên gold vừa (bỏ dấu) là id vang');
+    assert.equal(F.findAsset(s, 'vang').id, 'vang', 'gõ đúng y id thì được');
+    assert.equal(F.findAsset(s, 'gold').id, 'gold');
+  });
+  test('không có tài sản nào được giữ thì không bật cảnh báo thiếu tiền vì làm tròn vài cent', () => {
+    const rand = rng(11);
+    const c = structuredClone(START);
+    c.amounts = { btc: 1.12639625, gold: 0, cash: 0 };
+    const s = F.merge(PORTFOLIO, c);
+    for (let i = 0; i < 500; i++) {
+      const price = 60000 + rand() * 50000;
+      const v = F.valuation(s, { BTCUSDT: { last: price, open: 1 }, XAUTUSDT: { last: 3000 + rand() * 2000, open: 1 } });
+      const r = F.rebalancePlan(s, v, T({ btc: 50, gold: 50, cash: 0 }));
+      assert.equal(r.limited, false, `giá ${price}`);
+      assert.ok(r.cashAfter >= 0);
+    }
+  });
+  test('không khuyến nghị bán nhiều hơn mức lý tưởng, kể cả giá lẻ', () => {
+    const rand = rng(5);
+    const c = structuredClone(START);
+    c.amounts = { btc: 1.12639625, gold: 0, cash: 0 };
+    const s = F.merge(PORTFOLIO, c);
+    for (let i = 0; i < 500; i++) {
+      const price = 60000 + Math.round(rand() * 5e6) / 100;
+      const v = F.valuation(s, { BTCUSDT: { last: price, open: 1 }, XAUTUSDT: { last: 4000, open: 1 } });
+      const r = F.rebalancePlan(s, v, T({ btc: 40, gold: 40, cash: 20 }));
+      const btc = r.rows.find((x) => x.id === 'btc');
+      assert.ok(btc.qty <= 1.12639625 * 0.6 + 1e-12, `bán ${btc.qty} > lý tưởng ${1.12639625 * 0.6} ở giá ${price}`);
+    }
+  });
+  test('khoản dưới mức tối thiểu của sàn thì giữ', () => {
+    const c = structuredClone(START);
+    c.amounts = { btc: 1, gold: 0, cash: 3 };
+    const s = F.merge(PORTFOLIO, c);
+    const v = F.valuation(s, { BTCUSDT: { last: 100000, open: 1 }, XAUTUSDT: { last: 4000, open: 1 } });
+    // Vàng muốn ~1% (≈1.000 USDT) nhưng chỉ có 3 USDT tiền mặt và BTC lệch dưới ngưỡng: không mua lắt nhắt.
+    const r = F.rebalancePlan(s, v, T({ btc: 99.003, gold: 0.997, cash: 0 }), { bandPct: 1, minTradeUsdt: 5 });
+    assert.equal(r.rows.find((x) => x.id === 'gold').action, 'giu');
+    assert.ok(F.rebalancePlan(s, v, T({ btc: 90, gold: 5, cash: 5 }), { minTradeUsdt: -1 }).error);
+  });
+  test('tổng tỷ trọng lệch được in gọn, không ra 99.89999999999999', () => {
+    const e = F.parseTargets(state0(), ['btc 33.3 gold 33.3 cash 33.3']).error;
+    assert.ok(e.includes('99.9%') && !e.includes('99.899'), e);
+  });
+});
+
+describe('cân bằng: vòng review 4', () => {
+  const T = (o) => new Map(Object.entries(o));
+  test('mục tiêu 0% thì bán hết, không sót satoshi', () => {
+    const rand = rng(3);
+    const c = structuredClone(START);
+    c.amounts = { btc: 1.12639625, gold: 0, cash: 0 };
+    const s = F.merge(PORTFOLIO, c);
+    for (let i = 0; i < 300; i++) {
+      const v = F.valuation(s, { BTCUSDT: { last: 60000 + rand() * 50000, open: 1 }, XAUTUSDT: { last: 4000, open: 1 } });
+      const btc = F.rebalancePlan(s, v, T({ btc: 0, gold: 50, cash: 50 })).rows.find((x) => x.id === 'btc');
+      assert.equal(btc.qty, 1.12639625);
+    }
+  });
+  test('quy mô rất lớn: tiền mặt sau vẫn không âm', () => {
+    const c = structuredClone(START);
+    c.amounts = { btc: 4764.40977283, gold: 0, cash: 0 };
+    const s = F.merge(PORTFOLIO, c);
+    const v = F.valuation(s, { BTCUSDT: { last: 65220.65, open: 1 }, XAUTUSDT: { last: 3779.93, open: 1 } });
+    const r = F.rebalancePlan(s, v, T({ btc: 17, gold: 83, cash: 0 }));
+    assert.ok(r.cashAfter >= 0, `cashAfter ${r.cashAfter}`);
+  });
+  test('BTC viết hoa vẫn là id btc dù tài sản khác có ticker BTC', () => {
+    const p = structuredClone(PORTFOLIO);
+    p.assets.splice(1, 0, { id: 'btc_cold', name: 'BTC ví lạnh', ticker: 'BTC', unit: 'BTC', pair: 'BTCUSDT' });
+    const c = structuredClone(START);
+    c.amounts.btc_cold = 0;
+    c.units.btc_cold = 'BTC';
+    const s = F.merge(p, c);
+    assert.equal(F.findAsset(s, 'BTC').id, 'btc');
+  });
+  test('tài sản giá rất cao không bật cảnh báo thiếu tiền giả', () => {
+    const rand = rng(9);
+    const p = structuredClone(PORTFOLIO);
+    p.assets.splice(2, 0, { id: 'big', name: 'Big', ticker: 'BIG', unit: 'BIG', pair: 'BIGUSDT' });
+    for (let i = 0; i < 500; i++) {
+      const c = structuredClone(START);
+      c.amounts = { btc: Math.floor(rand() * 1e8) / 1e8, gold: Math.floor(rand() * 1e9) / 1e8, big: Math.floor(rand() * 1e8) / 1e8, cash: 0 };
+      c.units = { btc: 'BTC', gold: 'oz', big: 'BIG', cash: 'USDT' };
+      const s = F.merge(p, c);
+      const v = F.valuation(s, { BTCUSDT: { last: 90000, open: 1 }, XAUTUSDT: { last: 4000, open: 1 }, BIGUSDT: { last: 1e6 + rand() * 5e6, open: 1 } });
+      const r = F.rebalancePlan(s, v, T({ btc: 30, gold: 30, big: 40, cash: 0 }), { bandPct: 0 });
+      if (r.rows.some((x) => x.action === 'giu' && !x.isCash)) continue;
+      assert.equal(r.limited, false);
+      assert.ok(r.cashAfter >= 0);
+    }
+  });
+  test('validateTargets nhận cả object thường', () => {
+    assert.deepEqual(F.validateTargets(state0(), { btc: 40, gold: 40, cash: 20 }), []);
   });
 });
