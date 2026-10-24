@@ -260,6 +260,20 @@
         <span><strong>${esc(c.name)}</strong> ${VERB[txType(c)]} ${fmt2.format(c.amount)} USDT${c.shares ? ` (${fmtInt.format(c.shares)} cổ phần)` : ''}</span>
         <span class="history-price">giá ${fmtShare(c.sharePrice)} USDT/cổ phần</span>
       </li>`).join('');
+
+    // Mua/bán tài sản không đổi cổ phần; liệt kê để cả nhà đối chiếu vì sao BTC/tiền mặt thay đổi.
+    const trades = S.trades || [];
+    $('trades-wrap').hidden = !trades.length;
+    $('trades').innerHTML = [...trades].reverse().map((t) => {
+      const a = S.assets.find((x) => x.id === t.asset);
+      const unitPrice = t.usdt / t.qty;
+      return `
+      <li class="tx-${t.side === 'ban' ? 'rut' : 'gop'}">
+        <span class="history-date">${esc(fmtDate(t.date))}</span>
+        <span><strong>${t.side === 'ban' ? 'Bán' : 'Mua'}</strong> ${fmtQty.format(t.qty)} ${esc(a ? unitLabel(a) : t.asset)} ${esc(a ? a.name : '')}, ${t.side === 'ban' ? 'nhận' : 'trả'} ${fmt2.format(t.usdt)} USDT</span>
+        <span class="history-price">≈ ${fmt2.format(unitPrice)} USDT/${esc(a ? unitLabel(a) : t.asset)}</span>
+      </li>`;
+    }).join('');
   }
 
   // Giá lần vẽ gần nhất, để đổi USDT/VNĐ vẽ lại ngay mà không gọi lại Binance.

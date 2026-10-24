@@ -486,6 +486,9 @@ describe('calculated.js thật', () => {
       const hist = Array.isArray(old.history) ? old.history : [];
       assert.ok(current.length >= hist.length, `lịch sử ngắn hơn bản ${sha.slice(0, 7)}: ${hist.length} -> ${current.length}`);
       hist.forEach((c, i) => assert.deepEqual(current[i], c, `dòng ${i + 1} khác bản ${sha.slice(0, 7)}`));
+      const oldTrades = Array.isArray(old.trades) ? old.trades : [];
+      assert.ok(real.trades.length >= oldTrades.length, `lịch sử mua bán ngắn hơn bản ${sha.slice(0, 7)}`);
+      oldTrades.forEach((t, i) => assert.deepEqual(real.trades[i], t, `dòng mua bán ${i + 1} khác bản ${sha.slice(0, 7)}`));
     }
     const nowInitial = JSON.stringify(readPortfolio().initialShares);
     for (const { sha, source } of versions('portfolio.js')) {
@@ -511,5 +514,80 @@ describe('findHolder', () => {
     s.shareholders.push({ name: 'Cẩm', shares: 0 });
     assert.ok(F.findHolder(s, 'cam').error, 'Cam và Cẩm cùng thành "cam"');
     assert.equal(F.findHolder(s, 'Cẩm').index, 5, 'gõ đúng có dấu thì vẫn được');
+  });
+});
+
+describe('mua/bán tài sản', () => {
+  const sell = (s, qty, usdt) => F.prepareTrade(s, { side: 'ban', assetId: 'btc', qtyUnits: F.parseQty(qty).units, cents: F.parseAmount(usdt).cents }, '2026-10-24');
+  test('bán BTC: BTC giảm, tiền mặt tăng đúng tới satoshi/cent, cổ phần không đổi', () => {
+    const s = state0();
+    const r = sell(s, '0.01', '806.50');
+    assert.ok(!r.error, r.error);
+    assert.equal(r.next.assets.find((a) => a.id === 'btc').amount, 0.99);
+    assert.equal(F.cashAsset(r.next).amount, 4806.5);
+    assert.deepEqual(r.next.shareholders, s.shareholders);
+    assert.equal(r.next.totalShares, s.totalShares);
+    assert.deepEqual(r.next.trades, [{ date: '2026-10-24', side: 'ban', asset: 'btc', qty: 0.01, usdt: 806.5 }]);
+    assert.deepEqual(F.validate(r.next), []);
+    assert.ok(F.sameLedger(F.merge(PORTFOLIO, F.evalCalculated(F.toSource(r.next))), r.next), 'xuất rồi đọc lại khớp');
+  });
+  test('cộng trừ BTC lẻ không lệch số thực (1.12639625 - 0.01 - 0.00000001)', () => {
+    let s = state0();
+    s.assets.find((a) => a.id === 'btc').amount = 1.12639625;
+    s = sell(s, '0.01', '806').next;
+    s = sell(s, '0.00000001', '0.01').next;
+    assert.equal(s.assets.find((a) => a.id === 'btc').amount, 1.11639624);
+  });
+  test('bán quá số đang có, mua quá tiền mặt, sai tài sản, bán tiền mặt đều bị từ chối', () => {
+    const s = state0();
+    assert.ok(sell(s, '1.00000001', '80000').error);
+    assert.ok(F.prepareTrade(s, { side: 'mua', assetId: 'btc', qtyUnits: 1e6, cents: 400001 }, '2026-10-24').error);
+    assert.ok(F.prepareTrade(s, { side: 'ban', assetId: 'eth', qtyUnits: 1, cents: 1 }, '2026-10-24').error);
+    assert.ok(F.prepareTrade(s, { side: 'ban', assetId: 'cash', qtyUnits: 1, cents: 1 }, '2026-10-24').error);
+  });
+  test('parseQty: tối đa 8 số lẻ, từ chối dấu ngăn cách hàng nghìn', () => {
+    assert.deepEqual(F.parseQty('0.01'), { units: 1000000 });
+    assert.deepEqual(F.parseQty('0,00000001'), { units: 1 });
+    for (const bad of ['0.000000001', '1.000.000', '1 000', '-1', '0', 'abc', '']) assert.ok(F.parseQty(bad).error, bad);
+  });
+  test('dòng mua bán sai trong sổ bị validate phát hiện', () => {
+    const bad = structuredClone(START);
+    bad.trades = [{ date: '2026-10-24', side: 'sell', asset: 'btc', qty: 0.01, usdt: 806.5 }];
+    assert.ok(F.validate(F.merge(PORTFOLIO, bad)).some((e) => e.includes('mua bán')));
+  });
+});
+
+describe('cân bằng danh mục', () => {
+  const prices = { BTCUSDT: { last: 80000, open: 80000 }, XAUTUSDT: { last: 4000, open: 4000 } };
+  test('70/20/10: bán BTC, mua vàng, tiền mặt giữ đúng phần còn lại', () => {
+    const c = structuredClone(START);
+    c.amounts = { btc: 1.12639625, gold: 0, cash: 0 };
+    const s = F.merge(PORTFOLIO, c);
+    const r = F.rebalancePlan(s, F.valuation(s, prices), { btc: 70, gold: 20, cash: 10 });
+    const by = Object.fromEntries(r.rows.map((x) => [x.id, x]));
+    assert.equal(by.btc.action, 'ban');
+    assert.equal(by.gold.action, 'mua');
+    assert.equal(by.cash.action, 'giu');
+    const nav = 1.12639625 * 80000;
+    assert.ok(Math.abs(by.btc.usdt - (nav - nav * 0.7)) < 1e-6);
+    assert.ok(Math.abs(by.gold.usdt - nav * 0.2) < 1e-6);
+    // Tiền bán BTC trừ tiền mua vàng đúng bằng phần tiền mặt mục tiêu.
+    assert.ok(Math.abs(by.btc.usdt - by.gold.usdt - by.cash.targetValue) < 1e-6);
+    assert.ok(by.btc.qty <= by.btc.usdt / 80000, 'không khuyến nghị bán nhiều hơn cần');
+  });
+  test('lệch dưới ngưỡng thì giữ', () => {
+    const s = state0();
+    const v = F.valuation(s, prices);
+    const w = Object.fromEntries(v.rows.map((r) => [r.id, r.weight * 100]));
+    const r = F.rebalancePlan(s, v, w);
+    assert.ok(r.rows.every((x) => x.action === 'giu'));
+  });
+  test('tỷ trọng mục tiêu sai bị từ chối', () => {
+    const s = state0();
+    const v = F.valuation(s, prices);
+    assert.ok(F.rebalancePlan(s, v, undefined).error);
+    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 20, cash: 5 }).error, 'tổng 95%');
+    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 30 }).error, 'thiếu cash');
+    assert.ok(F.rebalancePlan(s, v, { btc: 70, gold: 20, cash: 10, eth: 0 }).error, 'id lạ');
   });
 });

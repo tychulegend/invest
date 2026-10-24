@@ -27,11 +27,15 @@ window.CALCULATED = {
     { name: "Cam", shares: 0 },
     { name: "Bến Tre", shares: 0 },
     { name: "Tóc Vàng Hoe", shares: 0 },
-    { name: "Cháu Gái Dễ Thương", shares: 0 },
   ],
 
   // Lịch sử góp ('gop') và rút ('rut') vốn, để cả nhà đối chiếu.
   history: [
+
+  ],
+
+  // Lịch sử mua ('mua') / bán ('ban') tài sản bằng tiền mặt; không đổi cổ phần của ai.
+  trades: [
 
   ],
 };

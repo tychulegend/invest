@@ -26,6 +26,10 @@
   const isInt = (n) => Number.isInteger(n);
   const isMoney = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const toCents = (usdt) => Math.round(usdt * 100);
+  // Số lượng tài sản (BTC, oz vàng…) cộng trừ bằng số nguyên đơn vị 1e-8, không cộng trừ số thực.
+  const QTY_SCALE = 1e8;
+  const toQtyUnits = (qty) => Math.round(qty * QTY_SCALE);
+  const isWholeQty = (qty) => isMoney(qty) && toQtyUnits(qty) / QTY_SCALE === qty;
   // Số tiền lưu trong sổ phải là số cent nguyên, không thì mỗi lần cộng trừ sẽ âm thầm làm tròn.
   // So với chính nó sau khi làm tròn tới cent, nên đúng ở mọi độ lớn (không dùng sai số tuyệt đối).
   const isWholeCents = (usdt) => isMoney(usdt) && Math.round(usdt * 100) / 100 === usdt;
@@ -115,6 +119,18 @@
   }
 
   /**
+   * Đọc số lượng tài sản người dùng gõ (vd 0.01 BTC): chữ số, tối đa 8 số lẻ, không dấu ngăn cách hàng nghìn.
+   * @returns {{units: number}|{error: string}} units là số nguyên đơn vị 1e-8
+   */
+  function parseQty(raw) {
+    const s = String(raw ?? '').trim();
+    if (!/^\d+([.,]\d{1,8})?$/.test(s)) return { error: 'Số lượng chỉ gồm chữ số, tối đa 8 số lẻ, không dùng dấu ngăn cách hàng nghìn. Ví dụ: 0.01' };
+    const units = Math.round(parseFloat(s.replace(',', '.')) * QTY_SCALE);
+    if (!(units > 0)) return { error: 'Số lượng phải lớn hơn 0.' };
+    return { units };
+  }
+
+  /**
    * Gộp cấu hình tĩnh (portfolio.js) với số liệu thay đổi (calculated.js) thành một state mới,
    * không sửa hai object gốc. Sai cấu trúc (vd thiếu ngoặc vuông) không ném lỗi mà ghi vào
    * shapeErrors để validate() báo ra.
@@ -141,6 +157,7 @@
       extraAmountIds: Object.keys(amounts).filter((id) => !portfolio.assets.some((a) => a.id === id)),
       shareholders: list('shareholders'),
       history: list('history'),
+      trades: list('trades'),
       shapeErrors,
     };
   }
@@ -250,6 +267,17 @@
         if (!replay.has(h.name) && h.shares !== 0) errs.push(`${h.name} có ${h.shares} cổ phần nhưng không có trong mốc ban đầu hay lịch sử.`);
       });
     }
+    state.assets.forEach((a) => {
+      if (a.id !== state.contributionAsset && isMoney(a.amount) && !isWholeQty(a.amount)) errs.push(`amounts.${a.id} chỉ được có tối đa 8 số lẻ (đang là ${a.amount}).`);
+    });
+    state.trades.forEach((t, i) => {
+      const where = `Lịch sử mua bán dòng ${i + 1}`;
+      if (t.side !== 'ban' && t.side !== 'mua') errs.push(`${where} có side không hợp lệ: ${JSON.stringify(t.side)}.`);
+      if (!state.assets.some((a) => a.id === t.asset)) errs.push(`${where} có tài sản không khai báo trong portfolio.js: ${JSON.stringify(t.asset)}.`);
+      if (!isWholeQty(t.qty) || !(t.qty > 0)) errs.push(`${where} có số lượng không hợp lệ.`);
+      if (!isWholeCents(t.usdt) || !(t.usdt > 0)) errs.push(`${where} có số tiền không hợp lệ.`);
+      if (!ISO_DATE.test(String(t.date))) errs.push(`${where} có ngày không hợp lệ: ${JSON.stringify(t.date)}.`);
+    });
     return errs;
   }
 
@@ -424,6 +452,112 @@
     return { valuation: v, plan, next };
   }
 
+  /**
+   * Mua/bán tài sản bằng tiền mặt (vd bán 0.01 BTC lấy 806.50 USDT). Không đổi cổ phần của ai; chỉ đổi
+   * số lượng tài sản và tiền mặt, theo đúng số thực nhận/thực trả trên sàn (đã trừ phí).
+   * @param {{side: 'ban'|'mua', assetId: string, qtyUnits: number, cents: number}} tr
+   * @returns {{error: string}|{plan: object, next: object}}
+   */
+  function prepareTrade(state, tr, date) {
+    const { side, assetId, qtyUnits, cents } = tr;
+    if (side !== 'ban' && side !== 'mua') return { error: `Loại giao dịch không hợp lệ: ${side}.` };
+    const asset = state.assets.find((a) => a.id === assetId);
+    const cash = cashAsset(state);
+    if (!asset) return { error: `Không có tài sản "${assetId}". Có: ${state.assets.map((a) => a.id).join(', ')}.` };
+    if (asset.id === cash.id) return { error: 'Không mua bán chính tiền mặt.' };
+    if (!(isInt(qtyUnits) && qtyUnits > 0)) return { error: 'Số lượng không hợp lệ.' };
+    if (!(isInt(cents) && cents > 0)) return { error: 'Số tiền không hợp lệ.' };
+    const haveUnits = toQtyUnits(asset.amount);
+    const cashCents = toCents(cash.amount);
+    if (side === 'ban' && qtyUnits > haveUnits) return { error: `Chỉ có ${haveUnits / QTY_SCALE} ${asset.unit}, không bán được ${qtyUnits / QTY_SCALE}.` };
+    if (side === 'mua' && cents > cashCents) return { error: `${cash.name} chỉ còn ${cashCents / 100} ${cash.unit}, không đủ trả ${cents / 100} USDT.` };
+    const sign = side === 'ban' ? -1 : 1;
+    const plan = {
+      side,
+      asset: asset.id,
+      assetName: asset.name,
+      unit: asset.unit,
+      qty: qtyUnits / QTY_SCALE,
+      usdt: cents / 100,
+      assetBefore: haveUnits / QTY_SCALE,
+      assetAfter: (haveUnits + sign * qtyUnits) / QTY_SCALE,
+      cashBefore: cashCents / 100,
+      cashAfter: (cashCents - sign * cents) / 100,
+    };
+    const next = {
+      ...state,
+      updatedAt: date,
+      assets: state.assets.map((a) => {
+        if (a.id === asset.id) return { ...a, amount: plan.assetAfter };
+        if (a.id === cash.id) return { ...a, amount: plan.cashAfter };
+        return { ...a };
+      }),
+      trades: [...state.trades, { date, side, asset: asset.id, qty: plan.qty, usdt: plan.usdt }],
+    };
+    const bad = validate(next);
+    if (bad.length) return { error: `Kết quả không hợp lệ, không xuất: ${bad.join(' ')}` };
+    return { plan, next };
+  }
+
+  /**
+   * Kiểm tra tỷ trọng mục tiêu trong portfolio.js: mỗi tài sản một con số % không âm, tổng đúng 100.
+   * @returns {string[]} danh sách lỗi
+   */
+  function validateTargets(state, targets) {
+    if (!targets || typeof targets !== 'object') return ['portfolio.js chưa có targetWeights (tỷ trọng mục tiêu, vd { btc: 70, gold: 20, cash: 10 }).'];
+    const errs = [];
+    Object.keys(targets).forEach((id) => {
+      if (!state.assets.some((a) => a.id === id)) errs.push(`targetWeights có id không khai báo trong assets: ${id}.`);
+    });
+    state.assets.forEach((a) => {
+      const w = targets[a.id];
+      if (!(typeof w === 'number' && Number.isFinite(w) && w >= 0)) errs.push(`targetWeights.${a.id} phải là số % không âm (đang là ${JSON.stringify(w)}).`);
+    });
+    const sum = state.assets.reduce((t, a) => t + (Number.isFinite(targets[a.id]) ? targets[a.id] : 0), 0);
+    if (Math.abs(sum - 100) > 1e-9) errs.push(`Tổng targetWeights phải đúng 100%, đang là ${sum}%.`);
+    return errs;
+  }
+
+  /**
+   * Khuyến nghị cân bằng danh mục về tỷ trọng mục tiêu theo giá hiện tại. Chỉ là gợi ý, không ghi sổ:
+   * mua/bán thật xong thì ghi bằng prepareTrade với số thực nhận/thực trả.
+   * Lệch nhỏ hơn bandPct (điểm %) so với mục tiêu thì "giữ", để khỏi mua bán lắt nhắt tốn phí.
+   * @returns {{error: string}|{rows: object[], nav: number}}
+   */
+  function rebalancePlan(state, val, targets, { bandPct = 1 } = {}) {
+    if (!val || !val.complete) return { error: 'Thiếu giá của ít nhất một tài sản, chưa tính được.' };
+    const bad = validateTargets(state, targets);
+    if (bad.length) return { error: bad.join(' ') };
+    if (!(val.nav > 0)) return { error: 'Tổng tài sản bằng 0, không có gì để cân bằng.' };
+    const cash = cashAsset(state);
+    const rows = val.rows.map((r) => {
+      const targetPct = targets[r.id];
+      const targetValue = (val.nav * targetPct) / 100;
+      const diffValue = targetValue - r.value;
+      const drift = r.weight * 100 - targetPct;
+      const isCash = r.id === cash.id;
+      let action = 'giu';
+      if (!isCash && Math.abs(drift) >= bandPct && r.unitPrice > 0) action = diffValue > 0 ? 'mua' : 'ban';
+      // Số lượng làm tròn xuống tới 1e-8 để không khuyến nghị bán nhiều hơn đang có.
+      const qty = action === 'giu' ? 0 : Math.floor((Math.abs(diffValue) / r.unitPrice) * QTY_SCALE) / QTY_SCALE;
+      return {
+        id: r.id,
+        name: r.name,
+        unit: r.unit,
+        isCash,
+        action,
+        qty,
+        usdt: action === 'giu' ? 0 : Math.abs(diffValue),
+        currentValue: r.value,
+        currentPct: r.weight * 100,
+        targetPct,
+        targetValue,
+        drift,
+      };
+    });
+    return { rows, nav: val.nav, bandPct };
+  }
+
   /* ---------- xuất / so sánh sổ ---------- */
 
   /** Phần dữ liệu của state được ghi ra calculated.js, dùng để so sánh hai state. */
@@ -433,6 +567,7 @@
     amounts: Object.fromEntries(state.assets.map((a) => [a.id, a.amount])),
     shareholders: state.shareholders.map((h) => ({ name: h.name, shares: h.shares })),
     history: state.history.map((c) => ({ date: c.date, type: c.type, name: c.name, amount: c.amount, shares: c.shares, sharePrice: c.sharePrice })),
+    trades: (state.trades || []).map((t) => ({ date: t.date, side: t.side, asset: t.asset, qty: t.qty, usdt: t.usdt })),
   });
   const sameLedger = (a, b) => JSON.stringify(ledgerOf(a)) === JSON.stringify(ledgerOf(b));
 
@@ -455,6 +590,7 @@
     const holders = state.shareholders.map((h) => `    { name: ${q(h.name)}, shares: ${h.shares} },`);
     const history = state.history.map((c) => `    { date: ${q(c.date)}, type: ${q(c.type)}, name: ${q(c.name)}, `
       + `amount: ${c.amount}, shares: ${c.shares}, sharePrice: ${c.sharePrice} },`);
+    const trades = (state.trades || []).map((t) => `    { date: ${q(t.date)}, side: ${q(t.side)}, asset: ${q(t.asset)}, qty: ${t.qty}, usdt: ${t.usdt} },`);
     return `// Số liệu thay đổi theo thời gian của quỹ.
 // Mục "Góp vốn" / "Rút vốn" trên trang xuất ra nguyên file này: sao chép rồi dán đè toàn bộ.
 // Sửa tay được (vd đổi tiền mặt sang BTC) nhưng chỉ sửa giá trị, không thêm trường mới
@@ -483,6 +619,11 @@ ${holders.join('\n')}
   history: [
 ${history.join('\n')}
   ],
+
+  // Lịch sử mua ('mua') / bán ('ban') tài sản bằng tiền mặt; không đổi cổ phần của ai.
+  trades: [
+${trades.join('\n')}
+  ],
 };
 `;
   }
@@ -491,6 +632,6 @@ ${history.join('\n')}
     UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchWithTimeout, fetchPrices,
     parseAmount, merge, validate, valuation,
     sharesForGop, sharesForRut, payoutForAll, historyEntryValid, replayShares,
-    planTx, applyTx, prepareTx, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,
+    planTx, applyTx, prepareTx, parseQty, prepareTrade, validateTargets, rebalancePlan, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,
   };
 }));

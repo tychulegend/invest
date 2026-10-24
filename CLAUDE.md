@@ -31,9 +31,12 @@ như một công ty cổ phần, định giá theo giá Binance, và tính góp/
 
 ## Lệnh tắt `/cmd`
 
-`/cmd gop 1000 cam`, `/cmd rut 500 cam`, `/cmd rut all cam`: skill ở `.claude/skills/cmd/SKILL.md`. Lệnh do
-người dùng gõ là sự đồng ý: ghi, commit và push thẳng lên `main` không hỏi lại, nhưng dừng và hỏi khi có bất
-thường (xem skill).
+`/cmd gop 1000 cam`, `/cmd rut 500 cam`, `/cmd ban 0.01 btc 806.50`, `/cmd mua 0.5 gold 2000`,
+`/cmd cân bằng danh mục`: skill ở `.claude/skills/cmd/SKILL.md`. Lệnh do người dùng gõ là sự đồng ý: ghi,
+commit và push thẳng lên `main` không hỏi lại, nhưng dừng và hỏi khi có bất thường (xem skill).
+
+Mua/bán tài sản (`trades` trong `calculated.js`) không đổi cổ phần; chỉ đổi `amounts` của tài sản và tiền mặt,
+theo số USDT thực nhận/thực trả. Cân bằng danh mục chỉ in khuyến nghị theo `targetWeights` trong `portfolio.js`.
 
 ## Khi được nhờ ghi một giao dịch góp/rút (không qua `/cmd`)
 
