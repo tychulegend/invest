@@ -134,7 +134,7 @@
       const ch = live && t.open > 0 ? t.last / t.open - 1 : 0;
       return `
       <li>
-        <span class="asset-icon sm" style="--c:var(--logo)" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[a.id] || ''}</svg></span>
+        ${icon(a, 'sm')}
         <span class="ticker-name">${esc(a.ticker)}</span>
         <span class="ticker-price">${live ? money(t.last) : 'Không có giá'}</span>
         ${live ? pctChange(ch) : ''}
