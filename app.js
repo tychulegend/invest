@@ -295,8 +295,75 @@
   // Giá lần vẽ gần nhất, để đổi USDT/VNĐ vẽ lại ngay mà không gọi lại Binance.
   let lastData = null;
 
+  // Lần đầu vào chưa có giá (kể cả giá lưu sẵn): dựng sẵn khung đúng kích thước, chỉ chừa trống các số cần giá,
+  // để khi giá về trang không nhảy layout. Số không cần giá (số lượng, cổ phần) hiện luôn.
+  const skel = (w, cls = '') => `<span class="skel ${cls}" style="--sk:${w}" aria-hidden="true"></span>`;
+
+  function renderSkeleton() {
+    document.body.classList.add('is-loading');
+    const rows = S.assets.map((a) => ({ ...a, amount: Number.isFinite(a.amount) ? a.amount : 0 }));
+    $('share-price').innerHTML = skel('4.2em', 'skel-xl');
+    $('share-change').innerHTML = skel('19em');
+    $('nav-total').innerHTML = skel('8em');
+    $('shares-total').textContent = fmtInt.format(S.totalShares);
+    $('price-1000').innerHTML = skel('6em');
+    $('tickers').innerHTML = rows.filter((a) => a.pair).map((a) => `
+      <li>${icon(a, 'sm')}<span class="ticker-name">${esc(a.ticker)}</span>${skel('7.5em')}${skel('3em')}</li>`).join('');
+
+    $('donut').innerHTML = `<path class="skel-ring" d="${arcPath(110, 110, 104, 70, 0, Math.PI * 2 - 1e-4)}"/>`;
+    $('donut-center').innerHTML = skel('4.5em');
+    $('legend').innerHTML = rows.map((x) => `
+      <li>${icon(x, 'sm')}<span>${esc(x.name)}</span><span class="val">${skel('5.5em')}</span><span class="pct">${skel('3.5em')}</span></li>`).join('');
+
+    $('ledger').innerHTML = `
+      <tbody>
+        ${rows.map((x, i) => `
+        <tr>
+          <td class="op">${i ? '+' : ''}</td>
+          <td><span class="ledger-asset">${icon(x, 'sm')}<span>${esc(x.name)}<span class="sub">${fmtQty.format(x.amount)} ${esc(unitLabel(x))}</span></span></span></td>
+          <td>${skel('5.5em')}</td>
+        </tr>`).join('')}
+        <tr class="total"><td class="op">=</td><td>Tổng tài sản ròng</td><td>${skel('7em')}</td></tr>
+        <tr><td class="op">÷</td><td>Tổng số cổ phần</td><td>${fmtInt.format(S.totalShares)}</td></tr>
+        <tr class="result"><td class="op">=</td><td>Giá mỗi cổ phần</td><td>${skel('6em')}</td></tr>
+      </tbody>`;
+
+    $('holdings').innerHTML = rows.map((x) => `
+      <div class="asset" role="row">
+        <span class="cell c-name" role="cell">
+          ${icon(x)}
+          <span>${esc(x.name)} <span class="sub">${esc(x.ticker)}</span></span>
+        </span>
+        ${cell('c-qty', 'Số lượng', `${fmtQty.format(x.amount)} ${esc(unitLabel(x))}`)}
+        ${cell('c-price', 'Đơn giá', skel('5em'))}
+        ${cell('c-chg', '24 giờ', skel('3em'))}
+        ${cell('c-value', `Giá trị (${curLabel()})`, skel('5.5em'))}
+        ${cell('c-weight', 'Tỷ trọng', skel('3.5em'))}
+        ${cell('c-shares', 'Cổ phần tương ứng', skel('5em'))}
+      </div>`).join('');
+    $('holdings-foot').innerHTML = `
+      <div class="asset asset-total" role="row">
+        <span class="cell c-name" role="cell">Tổng cộng</span>
+        ${cell('c-chg', '24 giờ', skel('3em'))}
+        ${cell('c-value', `Giá trị (${curLabel()})`, skel('6em'))}
+        ${cell('c-weight', 'Tỷ trọng', '100,00%')}
+        ${cell('c-shares', 'Cổ phần', fmtInt.format(S.totalShares))}
+      </div>`;
+
+    const list = holders();
+    $('holders-panel').hidden = !list.length;
+    $('holders').innerHTML = list.map((h) => `
+      <div class="holder${h.shares ? '' : ' empty'}" role="row">
+        <span class="cell h-name" role="cell">${esc(h.name)}</span>
+        ${cell('h-shares', 'Số cổ phần', fmtInt.format(h.shares))}
+        ${cell('h-pct', 'Sở hữu', fmtOwn(h.shares))}
+        ${cell('h-value', `Giá trị (${curLabel()})`, skel('6em'))}
+      </div>`).join('');
+  }
+
   function render(data, v = F.valuation(S, data.prices)) {
     lastData = data;
+    document.body.classList.remove('is-loading', 'is-offline');
     document.querySelectorAll('[data-cur]').forEach((el) => { el.textContent = curLabel(); });
     renderCertificate(v);
     renderTickers(data);
@@ -352,6 +419,8 @@
       if (cached) {
         try { render(cached); } catch (re) { return notify(`Lỗi hiển thị trang: ${re.message}`); }
       }
+      // Không có giá nào để hiện: giữ khung nhưng thôi nhấp nháy, cho khỏi tưởng vẫn đang tải.
+      if (!cached && !lastData) document.body.classList.add('is-offline');
       notify(cached
         ? 'Không kết nối được Binance. Đang hiển thị giá đã lưu lần trước; bấm "Cập nhật giá" để thử lại.'
         : 'Không kết nối được Binance nên chưa có giá. Kiểm tra mạng rồi bấm "Cập nhật giá".');
@@ -793,9 +862,11 @@
   if (!loadError) {
     $('refresh').addEventListener('click', refresh);
     const cached = readCache();
+    let shown = false;
     if (cached) {
-      try { render(cached); } catch (e) { /* cache hỏng thì bỏ qua, refresh() sẽ vẽ lại */ }
+      try { render(cached); shown = true; } catch (e) { /* cache hỏng thì bỏ qua, refresh() sẽ vẽ lại */ }
     }
+    if (!shown) renderSkeleton();
     refresh();
     setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
   }

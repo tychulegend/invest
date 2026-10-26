@@ -666,6 +666,26 @@ h1, h2, p { margin: 0; }
 .seg-btn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .data-problems strong + ul + strong { display: block; margin-top: 10px; }
 .donut-center-value.is-long { font-size: 1.125rem; }
+
+/* First-visit placeholders while prices load; sized like the real numbers so nothing jumps */
+.skel {
+  display: inline-block;
+  vertical-align: middle;
+  width: var(--sk, 5em);
+  max-width: 100%;
+  height: 0.9em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.skel-xl { height: 0.72em; border-radius: 8px; vertical-align: baseline; }
+.donut .skel-ring { fill: color-mix(in srgb, var(--ink) 9%, transparent); stroke: none; }
+.is-loading .donut-center-label { visibility: hidden; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .is-loading:not(.is-offline) .skel,
+  .is-loading:not(.is-offline) .skel-ring { animation: skel-pulse 1.4s ease-in-out infinite; }
+  @keyframes skel-pulse { 50% { opacity: 0.45; } }
+}
 .btn-skip { margin-top: 8px; font-size: 0.8125rem; padding: 4px 10px; }
 /* Chỉ được sao chép bằng nút (đi qua mọi kiểm tra chống ghi đè), không bôi đen tay */
 .snippet { -webkit-user-select: none; user-select: none; }
