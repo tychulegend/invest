@@ -126,6 +126,22 @@
     el.textContent = `${signed(ch * 100, (n) => fmtPct.format(n))}% trong 24 giờ (${signed(v.priceChange, fmtSharePrice)} ${curLabel()} mỗi cổ phần)`;
   }
 
+  // Giá thị trường của từng tài sản theo cặp Binance (1 BTC, 1 XAUT), không theo đơn vị trong sổ.
+  function renderTickers(data) {
+    $('tickers').innerHTML = S.assets.filter((a) => a.pair).map((a) => {
+      const t = data.prices[a.pair];
+      const live = t && Number.isFinite(t.last) && t.last > 0;
+      const ch = live && t.open > 0 ? t.last / t.open - 1 : 0;
+      return `
+      <li>
+        <span class="asset-icon sm" style="--c:var(--logo)" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[a.id] || ''}</svg></span>
+        <span class="ticker-name">${esc(a.ticker)}</span>
+        <span class="ticker-price">${live ? money(t.last) : 'Không có giá'}</span>
+        ${live ? pctChange(ch) : ''}
+      </li>`;
+    }).join('');
+  }
+
   function arcPath(cx, cy, R, r, a0, a1) {
     const pt = (rad, a) => [cx + rad * Math.sin(a), cy - rad * Math.cos(a)];
     const large = a1 - a0 > Math.PI ? 1 : 0;
@@ -283,6 +299,7 @@
     lastData = data;
     document.querySelectorAll('[data-cur]').forEach((el) => { el.textContent = curLabel(); });
     renderCertificate(v);
+    renderTickers(data);
     renderDonut(v);
     renderLedger(v);
     renderHoldings(v);

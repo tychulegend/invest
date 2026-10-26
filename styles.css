@@ -11,6 +11,7 @@
   --down: #B3261E;
   --c-btc: #F7931A;
   --c-gold: #C9971C;
+  --logo: #B8891A;
   --gold-hi: #F2D374;
   --gold-lo: #A67810;
   --c-cash: #1E9A6E;
@@ -34,6 +35,7 @@
     --down: #F07A6E;
     --c-btc: #F7931A;
     --c-gold: #D4A631;
+    --logo: #D4A631;
     --gold-hi: #F0CF6A;
     --gold-lo: #9C7310;
     --c-cash: #2E9E78;
@@ -55,6 +57,7 @@
   --down: #F07A6E;
   --c-btc: #F7931A;
   --c-gold: #D4A631;
+  --logo: #D4A631;
   --gold-hi: #F0CF6A;
   --gold-lo: #9C7310;
   --c-cash: #2E9E78;
@@ -210,6 +213,21 @@ h1, h2, p { margin: 0; }
 }
 .cert-facts dt { color: var(--muted); font-size: 0.8125rem; }
 .cert-facts dd { margin: 2px 0 0; font-size: 1.25rem; font-weight: 600; }
+
+/* Market prices: icons in the logo gold */
+.cert-tickers {
+  margin: 28px 0 0;
+  padding: 20px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 40px;
+}
+.cert-tickers li { display: flex; align-items: center; gap: 10px; }
+.ticker-name { color: var(--muted); font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.04em; }
+.ticker-price { font-size: 1.125rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cert-tickers .up, .cert-tickers .down { font-size: 0.875rem; }
 
 /* Panels */
 .split {
