@@ -31,9 +31,16 @@
         <p class="fund-meta" id="fund-meta">Đang tải giá…</p>
       </div>
       <div class="controls">
-        <div class="seg" id="currency-switch" role="group" aria-label="Đơn vị tiền hiển thị" hidden>
-          <button type="button" class="seg-btn" data-currency="USDT" aria-pressed="true">USDT</button>
-          <button type="button" class="seg-btn" data-currency="VND" aria-pressed="false">VNĐ</button>
+        <div class="currency-box" id="currency-box" hidden>
+          <div class="seg" id="currency-switch" role="group" aria-label="Đơn vị tiền hiển thị">
+            <button type="button" class="seg-btn" data-currency="USDT" aria-pressed="true">USDT</button>
+            <button type="button" class="seg-btn" data-currency="VND" aria-pressed="false">VNĐ</button>
+          </div>
+          <button type="button" class="rate-btn" id="rate-btn">1 USDT = <span id="rate-value"></span> ₫</button>
+          <form class="rate-form" id="rate-form" hidden>
+            <input type="text" id="rate-input" inputmode="numeric" autocomplete="off" aria-label="Tỷ giá 1 USDT bằng bao nhiêu VNĐ" placeholder="26320">
+            <button type="submit" class="btn btn-sm">Lưu</button>
+          </form>
         </div>
         <button type="button" class="btn" id="refresh">Cập nhật giá</button>
         <button type="button" class="btn btn-icon" id="theme-toggle" aria-label="Đổi giao diện sáng/tối">
@@ -209,7 +216,7 @@
     </section>
 
     <footer class="footnote">
-      <p>Giá lấy từ Binance (BTC/USDT, XAUT/USDT), tự cập nhật mỗi phút. Vàng định giá theo XAUT (Tether Gold), tương đương 1 troy ounce vàng thế giới. Tiền mặt tính 1 USDT = 1. Khi xem bằng VNĐ, số tiền được quy đổi theo tỷ giá tự nhập trong portfolio.js (<span id="rate-note"></span>); góp/rút và lịch sử luôn ghi bằng USDT.</p>
+      <p>Giá lấy từ Binance (BTC/USDT, XAUT/USDT), tự cập nhật mỗi phút. Vàng định giá theo XAUT (Tether Gold), tương đương 1 troy ounce vàng thế giới. Tiền mặt tính 1 USDT = 1. Khi xem bằng VNĐ, số tiền được quy đổi theo tỷ giá trong portfolio.js, có thể bấm vào tỷ giá dưới nút USDT/VNĐ để sửa riêng trên máy mình (<span id="rate-note"></span>); góp/rút và lịch sử luôn ghi bằng USDT.</p>
     </footer>
   </div>
 

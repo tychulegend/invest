@@ -54,16 +54,24 @@
   const warnings = VND_RATE !== undefined && !hasVnd
     ? [`vndRate trong portfolio.js đang là ${JSON.stringify(VND_RATE)}, không giống tỷ giá USDT/VNĐ. Viết liền, vd 26000 (không viết 26.000). Tạm ẩn nút xem bằng VNĐ.`]
     : [];
+  const validRate = (r) => Number.isFinite(r) && r >= 1000 && r <= 1000000;
+  // Mỗi máy có thể tự nhập tỷ giá cho sát giá chợ; chỉ lưu trên máy đó, máy khác vẫn dùng portfolio.js.
+  const RATE_KEY = `${KEY_PREFIX}vndRate`;
+  let vndRate = VND_RATE;
+  try {
+    const r = Number(localStorage.getItem(RATE_KEY));
+    if (hasVnd && localStorage.getItem(RATE_KEY) !== null && validRate(r)) vndRate = r;
+  } catch (e) {}
   const CURRENCY_KEY = `${KEY_PREFIX}currency`;
   let currency = 'USDT';
   try { if (hasVnd && localStorage.getItem(CURRENCY_KEY) === 'VND') currency = 'VND'; } catch (e) {}
   const inVnd = () => currency === 'VND';
   const curLabel = () => (inVnd() ? 'VNĐ' : 'USDT');
   /** Số tiền (đầu vào luôn là USDT) theo đơn vị đang chọn, không kèm đơn vị. */
-  const fmtMoney = (usdt) => (inVnd() ? fmtInt.format(usdt * VND_RATE) : fmt2.format(usdt));
+  const fmtMoney = (usdt) => (inVnd() ? fmtInt.format(usdt * vndRate) : fmt2.format(usdt));
   const money = (usdt) => `${fmtMoney(usdt)} ${curLabel()}`;
   // Giá 1 cổ phần nhỏ (vài nghìn VNĐ, vài phần trăm USDT) nên cần nhiều chữ số hơn số tiền thường.
-  const fmtSharePrice = (usdt) => (inVnd() ? fmt2.format(usdt * VND_RATE) : fmtShare(usdt));
+  const fmtSharePrice = (usdt) => (inVnd() ? fmt2.format(usdt * vndRate) : fmtShare(usdt));
   const txType = (c) => (c.type === 'rut' ? 'rut' : 'gop');
   const VERB = { gop: 'góp', rut: 'rút' };
   const pairs = () => F.pairsOf(S);
@@ -174,7 +182,7 @@
       return `<path d="${d}" fill="${fill}" data-id="${esc(x.id)}" data-mid="${mid}" tabindex="0"
         aria-label="${esc(x.name)}: ${fmtPct.format(x.weight * 100)}%, ${money(x.value)}"></path>`;
     }).join('');
-    $('donut-center').textContent = fmtInt.format(inVnd() ? v.nav * VND_RATE : v.nav);
+    $('donut-center').textContent = fmtInt.format(inVnd() ? v.nav * vndRate : v.nav);
     // Số VNĐ dài (vài tỷ) không vừa lòng vòng tròn ở cỡ chữ thường.
     $('donut-center').classList.toggle('is-long', $('donut-center').textContent.length > 9);
 
@@ -761,7 +769,7 @@
       $(`${k}-form`).addEventListener('input', () => clearTx(k));
       $(`${k}-amount`).addEventListener('input', () => {
         const p = F.parseAmount($(`${k}-amount`).value);
-        $(`${k}-hint`).textContent = p.error || !hasVnd ? '' : `= ${fmt2.format(p.cents / 100)} USDT ≈ ${fmtInt.format((p.cents / 100) * VND_RATE)} VNĐ`;
+        $(`${k}-hint`).textContent = p.error || !hasVnd ? '' : `= ${fmt2.format(p.cents / 100)} USDT ≈ ${fmtInt.format((p.cents / 100) * vndRate)} VNĐ`;
       });
       $(`${k}-form`).addEventListener('submit', (e) => calculateTx(k, e));
       $(`${k}-copy`).addEventListener('click', () => copySnippet(k));
@@ -810,9 +818,61 @@
 
   function setupCurrency() {
     if (!hasVnd) return;
-    $('rate-note').textContent = `1 USDT = ${fmtInt.format(VND_RATE)} VNĐ`;
     const sw = $('currency-switch');
-    sw.hidden = false;
+    $('currency-box').hidden = false;
+    const rerender = () => {
+      if (lastData) {
+        try { render(lastData); } catch (err) { notify(`Lỗi hiển thị trang: ${err.message}`); }
+      }
+    };
+    const showRate = () => {
+      const custom = vndRate !== VND_RATE;
+      $('rate-value').textContent = fmtInt.format(vndRate);
+      $('rate-btn').classList.toggle('is-custom', custom);
+      $('rate-btn').title = custom ? `Tự nhập trên máy này (mặc định ${fmtInt.format(VND_RATE)}). Bấm để sửa.` : 'Bấm để sửa tỷ giá';
+      $('rate-note').textContent = `1 USDT = ${fmtInt.format(vndRate)} VNĐ${custom ? `, tự nhập trên máy này; mặc định ${fmtInt.format(VND_RATE)}` : ''}`;
+    };
+    const closeEditor = () => {
+      $('rate-form').hidden = true;
+      $('rate-btn').hidden = false;
+    };
+    // Bỏ trống thì quay về tỷ giá trong portfolio.js; số ngoài khoảng hợp lý thì không lưu.
+    const saveRate = () => {
+      if ($('rate-form').hidden) return;
+      const raw = $('rate-input').value.replace(/\D/g, '');
+      const r = raw ? Number(raw) : VND_RATE;
+      if (!validRate(r)) {
+        $('rate-input').setCustomValidity('Nhập tỷ giá dạng 26320');
+        $('rate-input').reportValidity();
+        return;
+      }
+      vndRate = r;
+      try {
+        if (r === VND_RATE) localStorage.removeItem(RATE_KEY);
+        else localStorage.setItem(RATE_KEY, String(r));
+      } catch (err) {}
+      closeEditor();
+      showRate();
+      rerender();
+    };
+    $('rate-btn').addEventListener('click', () => {
+      $('rate-btn').hidden = true;
+      $('rate-form').hidden = false;
+      $('rate-input').value = String(vndRate);
+      $('rate-input').setCustomValidity('');
+      $('rate-input').focus();
+      $('rate-input').select();
+    });
+    $('rate-input').addEventListener('input', () => $('rate-input').setCustomValidity(''));
+    $('rate-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEditor(); });
+    $('rate-form').addEventListener('submit', (e) => { e.preventDefault(); saveRate(); });
+    // Trên iPhone bấm "Xong" trên bàn phím chỉ làm mất focus, nên mất focus cũng tính là lưu.
+    $('rate-input').addEventListener('blur', () => {
+      const v = Number($('rate-input').value.replace(/\D/g, ''));
+      if (!$('rate-input').value.trim() || validRate(v)) saveRate();
+      else closeEditor();
+    });
+    showRate();
     const sync = () => sw.querySelectorAll('[data-currency]').forEach((b) => {
       b.setAttribute('aria-pressed', String(b.dataset.currency === currency));
     });
@@ -822,9 +882,7 @@
       currency = b.dataset.currency;
       try { localStorage.setItem(CURRENCY_KEY, currency); } catch (err) {}
       sync();
-      if (lastData) {
-        try { render(lastData); } catch (err) { notify(`Lỗi hiển thị trang: ${err.message}`); }
-      }
+      rerender();
     });
     sync();
   }

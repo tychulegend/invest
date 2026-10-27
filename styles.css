@@ -113,7 +113,7 @@ h1, h2, p { margin: 0; }
   font-size: 0.875rem;
 }
 
-.controls { display: flex; gap: 8px; flex-shrink: 0; }
+.controls { display: flex; gap: 8px; flex-shrink: 0; align-items: flex-start; }
 
 .btn {
   font: inherit;
@@ -650,7 +650,6 @@ h1, h2, p { margin: 0; }
   border-radius: 6px;
   overflow: hidden;
 }
-.seg[hidden] { display: none; }
 .seg-btn {
   font: inherit;
   font-size: 0.875rem;
@@ -719,3 +718,33 @@ h1, h2, p { margin: 0; }
 .ptr svg { display: block; }
 .ptr.is-spinning svg { animation: ptr-spin 0.8s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+/* Tỷ giá dưới nút USDT/VNĐ; bấm để sửa, lưu riêng trên máy */
+.currency-box { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.currency-box[hidden] { display: none; }
+.rate-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--rule);
+  padding: 2px 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rate-btn:hover { color: var(--ink); }
+.rate-btn.is-custom { color: var(--engrave); border-bottom-color: var(--engrave); }
+.rate-btn[hidden], .rate-form[hidden] { display: none; }
+.rate-form { display: flex; gap: 4px; }
+.rate-form input {
+  width: 4.6em;
+  font: inherit;
+  font-size: 16px; /* dưới 16px thì Safari iPhone tự phóng to trang khi gõ */
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.btn-sm { font-size: 0.8125rem; padding: 4px 10px; }
