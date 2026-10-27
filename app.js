@@ -406,7 +406,14 @@
     return { data, v };
   }
 
-  async function refresh() {
+  // Bấm nút, hẹn giờ và kéo xuống có thể chồng nhau; dùng chung một lượt tải cho khỏi gọi Binance hai lần.
+  let refreshing = null;
+  function refresh() {
+    if (!refreshing) refreshing = doRefresh().finally(() => { refreshing = null; });
+    return refreshing;
+  }
+
+  async function doRefresh() {
     const btn = $('refresh');
     btn.disabled = true;
     btn.textContent = 'Đang cập nhật…';
@@ -847,6 +854,67 @@
     sync();
   }
 
+  /* ---------- kéo xuống để cập nhật giá ---------- */
+
+  // Mở từ màn hình chính iPhone (chế độ app) thì không có thanh địa chỉ để tải lại; tự làm thao tác kéo.
+  function setupPullToRefresh() {
+    const el = $('ptr');
+    const THRESHOLD = 70;
+    const MAX = 110;
+    let startY = null;
+    let startX = 0;
+    let pull = 0;
+    let busy = false;
+
+    const show = (dist, ready) => {
+      el.style.transform = `translate(-50%, ${dist - 56}px)`;
+      el.style.opacity = Math.min(dist / THRESHOLD, 1);
+      el.querySelector('svg').style.transform = `rotate(${dist * 3}deg)`;
+      el.classList.toggle('is-ready', ready);
+    };
+    const reset = () => {
+      el.classList.remove('is-pulling', 'is-spinning', 'is-ready');
+      el.removeAttribute('style');
+      el.querySelector('svg').removeAttribute('style');
+    };
+
+    document.addEventListener('touchstart', (e) => {
+      if (busy || e.touches.length !== 1 || window.scrollY > 0) { startY = null; return; }
+      startY = e.touches[0].clientY;
+      startX = e.touches[0].clientX;
+      pull = 0;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+      if (startY === null) return;
+      const dy = e.touches[0].clientY - startY;
+      const dx = Math.abs(e.touches[0].clientX - startX);
+      // Vuốt ngang (bảng cuộn ngang) hoặc kéo lên thì để trình duyệt tự xử lý.
+      if (!pull && (dy <= 0 || dx > dy)) { startY = null; return; }
+      e.preventDefault(); // chặn hiệu ứng nảy của iOS để vòng tải đi theo ngón tay
+      pull = Math.min(MAX, Math.max(0, dy) * 0.5);
+      el.classList.add('is-pulling');
+      show(pull, pull >= THRESHOLD);
+    }, { passive: false });
+
+    const end = async () => {
+      if (startY === null) return;
+      startY = null;
+      if (pull < THRESHOLD) { reset(); return; }
+      busy = true;
+      el.classList.remove('is-pulling', 'is-ready');
+      el.classList.add('is-spinning');
+      show(THRESHOLD, false);
+      el.querySelector('svg').removeAttribute('style');
+      // Giữ vòng quay tối thiểu một chút; giá về quá nhanh thì người dùng không kịp thấy là đã cập nhật.
+      await Promise.all([refresh(), new Promise((r) => setTimeout(r, 500))]);
+      reset();
+      busy = false;
+    };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+  }
+
   /* ---------- boot ---------- */
 
   $('fund-name').textContent = S.name;
@@ -861,6 +929,7 @@
   $('refresh').disabled = !!loadError;
   if (!loadError) {
     $('refresh').addEventListener('click', refresh);
+    setupPullToRefresh();
     const cached = readCache();
     let shown = false;
     if (cached) {
