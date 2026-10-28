@@ -3,15 +3,15 @@
 // Sửa tay được (vd đổi tiền mặt sang BTC) nhưng chỉ sửa giá trị, không thêm trường mới
 // (trường lạ sẽ bị bỏ ở lần xuất sau); tổng shares phải đúng bằng totalShares.
 window.CALCULATED = {
-  updatedAt: "2026-10-24",
+  updatedAt: "2026-10-28",
 
   // Tổng số cổ phần đang lưu hành; tăng khi có người góp, giảm khi có người rút.
   totalShares: 1000000,
 
   // Số lượng từng tài sản, theo id và đơn vị khai báo trong portfolio.js.
   amounts: {
-    "btc": 1.12639625,
-    "gold": 0,
+    "btc": 0.61950954,
+    "gold": 10.15135066,
     "cash": 0,
   },
 
