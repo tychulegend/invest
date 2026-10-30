@@ -14,6 +14,8 @@
   --gold-hi: #F2D374;
   --gold-lo: #A67810;
   --c-cash: #1E9A6E;
+  /* Cán cân XAUT/BTC: xanh trời để tách hẳn khỏi cam BTC, vàng XAUT và xanh lá tiền mặt. */
+  --c-cross: #1E8FD5;
   --focus: #1F6FB0;
   --display: 'Noto Serif Display', 'Didot', Georgia, serif;
   --text: 'Be Vietnam Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -37,6 +39,7 @@
     --gold-hi: #F0CF6A;
     --gold-lo: #9C7310;
     --c-cash: #2E9E78;
+    --c-cross: #5BB8EC;
     --focus: #7FB2EE;
     color-scheme: dark;
   }
@@ -58,6 +61,7 @@
   --gold-hi: #F0CF6A;
   --gold-lo: #9C7310;
   --c-cash: #2E9E78;
+  --c-cross: #5BB8EC;
   --focus: #7FB2EE;
   color-scheme: dark;
 }

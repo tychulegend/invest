@@ -29,6 +29,7 @@
   const ICONS = {
     btc: '<path d="M8 6h5a2.75 2.75 0 0 1 0 5.5H8M8 11.5h5.5a2.75 2.75 0 0 1 0 5.5H8M9.5 6v11M10.5 4v2M13 4v2M10.5 17v2M13 17v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
     gold: '<path d="M7.5 11.5h9L15 7.5H9z" fill="currentColor" fill-opacity=".35" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3.5 18.5h8l-1.5-4.5H5zM12.5 18.5h8L19 14h-5z" fill="currentColor" fill-opacity=".35" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M19 4.5v2.5M17.75 5.75h2.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+    cross: '<path d="M12 4v15M8 19.5h8M5 7h14M12 4.5v.01" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 7l-2.5 6h5zM19 7l-2.5 6h5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2.5 13a2.5 2 0 0 0 5 0zM16.5 13a2.5 2 0 0 0 5 0z" fill="currentColor" fill-opacity=".35" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>',
     cash: '<rect x="2.75" y="6.5" width="18.5" height="11" rx="2" fill="currentColor" fill-opacity=".2" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.75 9.5v.01M18.25 14.5v.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   };
 
@@ -155,7 +156,7 @@
     const gold = S.assets.find((a) => a.pair === 'XAUTUSDT');
     const btc = S.assets.find((a) => a.pair === 'BTCUSDT');
     if (!gold || !btc) return '';
-    const name = `${icon(gold, 'sm')}<span class="ticker-name">${esc(gold.ticker)}/${esc(btc.ticker)}</span>`;
+    const name = `${icon({ id: 'cross' }, 'sm')}<span class="ticker-name">${esc(gold.ticker)}/${esc(btc.ticker)}</span>`;
     if (!data) return `<li>${name}${skel('7.5em')}${skel('3em')}</li>`;
     const r = F.crossRate(data.prices, gold.pair, btc.pair);
     return `
