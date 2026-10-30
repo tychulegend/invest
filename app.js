@@ -147,7 +147,23 @@
         <span class="ticker-price">${live ? money(t.last) : 'Không có giá'}</span>
         ${live ? pctChange(ch) : ''}
       </li>`;
-    }).join('');
+    }).join('') + crossTicker(data);
+  }
+
+  // 1 XAUT đổi được bao nhiêu BTC: xem vàng đang mạnh hay yếu so với BTC, không phụ thuộc USDT/VNĐ.
+  function crossTicker(data) {
+    const gold = S.assets.find((a) => a.pair === 'XAUTUSDT');
+    const btc = S.assets.find((a) => a.pair === 'BTCUSDT');
+    if (!gold || !btc) return '';
+    const name = `${icon(gold, 'sm')}<span class="ticker-name">${esc(gold.ticker)}/${esc(btc.ticker)}</span>`;
+    if (!data) return `<li>${name}${skel('7.5em')}${skel('3em')}</li>`;
+    const r = F.crossRate(data.prices, gold.pair, btc.pair);
+    return `
+      <li>
+        ${name}
+        <span class="ticker-price">${r ? `${fmt6.format(r.last)} ${esc(btc.ticker)}` : 'Không có giá'}</span>
+        ${r && r.open > 0 ? pctChange(r.last / r.open - 1) : ''}
+      </li>`;
   }
 
   function arcPath(cx, cy, R, r, a0, a1) {
@@ -316,7 +332,8 @@
     $('shares-total').textContent = fmtInt.format(S.totalShares);
     $('price-1000').innerHTML = skel('6em');
     $('tickers').innerHTML = rows.filter((a) => a.pair).map((a) => `
-      <li>${icon(a, 'sm')}<span class="ticker-name">${esc(a.ticker)}</span>${skel('7.5em')}${skel('3em')}</li>`).join('');
+      <li>${icon(a, 'sm')}<span class="ticker-name">${esc(a.ticker)}</span>${skel('7.5em')}${skel('3em')}</li>`).join('')
+      + crossTicker(null);
 
     $('donut').innerHTML = `<path class="skel-ring" d="${arcPath(110, 110, 104, 70, 0, Math.PI * 2 - 1e-4)}"/>`;
     $('donut-center').innerHTML = skel('4.5em');

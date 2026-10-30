@@ -65,6 +65,18 @@
   }
 
   /**
+   * Tỷ giá chéo từ hai cặp USDT (vd XAUT/BTC = XAUTUSDT / BTCUSDT): Binance không có sẵn cặp này.
+   * Chỉ để hiển thị. Trả null khi thiếu giá.
+   * @returns {{last: number, open: number}|null} open = 0 khi thiếu giá mở cửa
+   */
+  function crossRate(prices, basePair, quotePair) {
+    const b = prices[basePair], q = prices[quotePair];
+    const ok = (x) => Number.isFinite(x) && x > 0;
+    if (!b || !q || !ok(b.last) || !ok(q.last)) return null;
+    return { last: b.last / q.last, open: ok(b.open) && ok(q.open) ? b.open / q.open : 0 };
+  }
+
+  /**
    * Lấy giá từ Binance, thử lần lượt các host. Dùng chung cho trang và CLI.
    * @param {string[]} pairs
    * @param {{fetchImpl: Function, hosts?: string[], timeoutMs?: number}} opts
@@ -755,7 +767,7 @@ ${trades.join('\n')}
   }
 
   return {
-    UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, fetchWithTimeout, fetchPrices,
+    UNIT_FACTOR, GOLD_PAIRS, BINANCE_HOSTS, todayISO, toCents, pairsOf, tickerUrl, parseTickers, crossRate, fetchWithTimeout, fetchPrices,
     parseAmount, merge, validate, valuation,
     sharesForGop, sharesForRut, payoutForAll, historyEntryValid, replayShares,
     planTx, applyTx, prepareTx, parseQty, prepareTrade, findAsset, validateTargets, parseTargets, rebalancePlan, ledgerOf, sameLedger, evalCalculated, toSource, cashAsset, findHolder,

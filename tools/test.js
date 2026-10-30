@@ -258,6 +258,19 @@ describe('valuation', () => {
   });
 });
 
+describe('crossRate', () => {
+  test('XAUT/BTC = XAUTUSDT / BTCUSDT, cả giá mở cửa', () => {
+    const r = F.crossRate({ XAUTUSDT: { last: 4000, open: 3900 }, BTCUSDT: { last: 100000, open: 104000 } }, 'XAUTUSDT', 'BTCUSDT');
+    assert.equal(r.last, 0.04);
+    assert.equal(r.open, 0.0375);
+  });
+  test('thiếu giá thì null, thiếu giá mở cửa thì open = 0', () => {
+    assert.equal(F.crossRate({ XAUTUSDT: { last: 4000, open: 1 } }, 'XAUTUSDT', 'BTCUSDT'), null);
+    assert.equal(F.crossRate({ XAUTUSDT: { last: 4000, open: 1 }, BTCUSDT: { last: 0, open: 1 } }, 'XAUTUSDT', 'BTCUSDT'), null);
+    assert.equal(F.crossRate({ XAUTUSDT: { last: 4000, open: NaN }, BTCUSDT: { last: 1, open: 1 } }, 'XAUTUSDT', 'BTCUSDT').open, 0);
+  });
+});
+
 describe('fetchPrices', () => {
   const ok = { ok: true, status: 200, json: async () => [{ symbol: 'BTCUSDT', lastPrice: '1', openPrice: '1' }] };
   const bad = { ok: false, status: 400, json: async () => ({}) };
