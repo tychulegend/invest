@@ -10,8 +10,8 @@ window.CALCULATED = {
 
   // Số lượng từng tài sản, theo id và đơn vị khai báo trong portfolio.js.
   amounts: {
-    "btc": 0.56261391,
-    "gold": 11.29204973,
+    "btc": 0,
+    "gold": 21.97755212,
     "cash": 0,
   },
 
