@@ -5,6 +5,9 @@ như một công ty cổ phần, định giá theo giá Binance, và tính góp/
 
 **Đây là tiền thật của gia đình. Mọi thay đổi số liệu phải đi qua `core.js` và phải chạy test.**
 
+Ngoài sổ cổ phần còn hai trang chỉ để xem thị trường (`companies.html`, `etf.html`); chúng tách hẳn khỏi sổ, không đọc
+và không ghi `core.js`/`calculated.js`/`portfolio.js`.
+
 ## File
 
 | File | Vai trò |
@@ -16,6 +19,12 @@ như một công ty cổ phần, định giá theo giá Binance, và tính góp/
 | `tools/test.js` | Test bất biến về tiền và kiểm tra chính sổ thật. `npm test` (`node:test`, không cần cài gì). |
 | `tools/tx.js` | Góp/rút từ dòng lệnh với giá Binance live. |
 | `.github/workflows/pages.yml` | Mỗi lần push: chạy `npm test` (kèm kiểm tra lịch sử chỉ nối thêm so với trước lần push), qua mới deploy Pages. |
+| `companies.html` + `companies.js` | Trang công ty/chính phủ nắm BTC. Gọi thẳng API công khai CoinGecko từ trình duyệt (không key, giới hạn theo IP nên có cache localStorage). |
+| `etf.html` + `etf.js` | Trang ETF Bitcoin: lượng BTC từng quỹ và tổ chức nắm IBIT/FBTC/ARKB theo 13F. Chỉ đọc `data/*.json`. |
+| `market.js` | Phần dùng chung của hai trang trên (định dạng, theme, cache, biểu đồ). Không dùng `FundCore`. |
+| `tools/fetch-data.js` | Gom dữ liệu trang ETF vào `data/`: Bitbo (lượng BTC các quỹ, mỗi ngày nối một dòng vào `history`) và SEC EDGAR (13F). Luôn xưng là bot; nguồn chặn bot (vd Farside) thì không dùng. |
+| `tools/test-data.js` | Test phần đọc dữ liệu ở trên và cấu trúc `data/*.json`; chạy chung trong `npm test`. |
+| `.github/workflows/data.yml` | Mỗi ngày 08:23 giờ VN chạy `fetch-data.js`, bot commit **chỉ thư mục `data/`** lên `main` rồi gọi `pages.yml` đăng lại. Vì vậy `main` trên GitHub thường đi trước máy: luôn `git pull` trước khi làm. |
 
 ## Mô hình (quỹ mở)
 

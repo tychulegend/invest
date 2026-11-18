@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Công ty tích luỹ Bitcoin</title>
+  <meta name="description" content="Các công ty đại chúng và chính phủ đang nắm giữ Bitcoin, và tốc độ họ mua thêm.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#13233B">
+  <script>
+    // Áp theme trước khi render để không bị nháy màu. Dùng chung khoá với trang sổ cổ phần.
+    try {
+      const t = localStorage.getItem('theme:' + location.pathname.replace(/[^/]*$/, ''));
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:wght@500;700&family=Be+Vietnam+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div>
+        <h1 class="fund-name">Công ty tích luỹ Bitcoin</h1>
+        <p class="fund-meta" id="meta">Đang tải dữ liệu…</p>
+      </div>
+      <div class="controls">
+        <button type="button" class="btn" id="refresh">Cập nhật</button>
+        <button type="button" class="btn btn-icon" id="theme-toggle" aria-label="Đổi giao diện sáng/tối"></button>
+      </div>
+    </header>
+
+    <nav class="site-nav" aria-label="Các trang">
+      <a href="./">Sổ cổ phần</a>
+      <a href="companies.html" aria-current="page">Công ty tích luỹ BTC</a>
+      <a href="etf.html">ETF Bitcoin</a>
+    </nav>
+
+    <p class="notice" id="notice" role="status" hidden></p>
+
+    <section class="stats" id="stats" aria-label="Tổng quan"></section>
+
+    <section class="panel" id="detail-panel" aria-labelledby="detail-title" hidden>
+      <h2 id="detail-title">Chi tiết</h2>
+      <div id="detail"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="companies-title">
+      <h2 id="companies-title">Công ty đại chúng nắm Bitcoin</h2>
+      <p class="panel-lead">Bấm vào một công ty để xem lượng BTC theo thời gian và từng lần mua bán.</p>
+      <div class="table-scroll">
+        <table class="data-table" id="companies">
+          <thead>
+            <tr>
+              <th class="t-rank">#</th>
+              <th>Công ty</th>
+              <th class="t-num">Số BTC</th>
+              <th class="t-num">Giá trị hiện tại</th>
+              <th class="t-num">% nguồn cung</th>
+              <th class="t-num">Giá vốn TB (USD)</th>
+              <th class="t-num">Lời/lỗ</th>
+            </tr>
+          </thead>
+          <tbody id="companies-body"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-more" id="companies-more" hidden></button>
+    </section>
+
+    <section class="panel" aria-labelledby="gov-title">
+      <h2 id="gov-title">Chính phủ nắm Bitcoin</h2>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="t-rank">#</th>
+              <th>Quốc gia</th>
+              <th class="t-num">Số BTC</th>
+              <th class="t-num">Giá trị hiện tại</th>
+              <th class="t-num">% nguồn cung</th>
+            </tr>
+          </thead>
+          <tbody id="gov-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footnote">
+      <p>Số liệu từ CoinGecko, tổng hợp theo công bố của từng công ty nên có thể trễ vài ngày so với thực tế. % nguồn cung tính trên 21 triệu BTC. Giá vốn trung bình và lời/lỗ chỉ có với công ty công bố giá mua. Phần lớn BTC của các chính phủ là tài sản tịch thu, không phải mua vào. Dữ liệu được lưu tạm trên máy 10 phút để không vượt giới hạn gọi của nguồn.</p>
+    </footer>
+  </div>
+
+  <script>
+    ['market.js', 'companies.js'].forEach((src) => {
+      const s = document.createElement('script');
+      s.src = `${src}?v=${Date.now()}`;
+      s.async = false;
+      document.body.appendChild(s);
+    });
+  </script>
+</body>
+</html>

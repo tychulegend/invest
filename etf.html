@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ETF Bitcoin</title>
+  <meta name="description" content="Lượng Bitcoin các quỹ ETF đang nắm và các tổ chức đang nắm IBIT, FBTC, ARKB theo báo cáo 13F.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="theme-color" content="#13233B">
+  <script>
+    // Áp theme trước khi render để không bị nháy màu. Dùng chung khoá với trang sổ cổ phần.
+    try {
+      const t = localStorage.getItem('theme:' + location.pathname.replace(/[^/]*$/, ''));
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Display:wght@500;700&family=Be+Vietnam+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="masthead">
+      <div>
+        <h1 class="fund-name">ETF Bitcoin</h1>
+        <p class="fund-meta" id="meta">Đang tải dữ liệu…</p>
+      </div>
+      <div class="controls">
+        <button type="button" class="btn btn-icon" id="theme-toggle" aria-label="Đổi giao diện sáng/tối"></button>
+      </div>
+    </header>
+
+    <nav class="site-nav" aria-label="Các trang">
+      <a href="./">Sổ cổ phần</a>
+      <a href="companies.html">Công ty tích luỹ BTC</a>
+      <a href="etf.html" aria-current="page">ETF Bitcoin</a>
+    </nav>
+
+    <p class="notice" id="notice" role="status" hidden></p>
+
+    <section class="stats" id="stats" aria-label="Tổng quan"></section>
+
+    <section class="panel" aria-labelledby="trend-title">
+      <h2 id="trend-title">Tổng BTC các ETF nắm theo ngày</h2>
+      <p class="panel-lead">Đường đi lên là các quỹ đang gom thêm BTC, đi xuống là nhà đầu tư đang rút ra.</p>
+      <div class="chart-wrap" id="trend-chart"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="funds-title">
+      <h2 id="funds-title">Lượng BTC từng quỹ</h2>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="t-rank">#</th>
+              <th>Quỹ</th>
+              <th class="t-num">Số BTC</th>
+              <th class="t-num">Giá trị</th>
+              <th class="t-num">Tỷ trọng</th>
+              <th class="t-num">1 ngày</th>
+              <th class="t-num">7 ngày</th>
+              <th class="t-num">30 ngày</th>
+            </tr>
+          </thead>
+          <tbody id="funds-body"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-more" id="funds-more" hidden></button>
+    </section>
+
+    <section class="panel" aria-labelledby="f13-title">
+      <h2 id="f13-title">Tổ chức nắm cổ phiếu ETF (báo cáo 13F)</h2>
+      <p class="panel-lead" id="f13-lead">Đang tải…</p>
+      <div id="f13" hidden>
+        <div class="f13-bar">
+          <div class="seg" id="f13-tabs" role="group" aria-label="Chọn quỹ"></div>
+          <label class="field f13-search">
+            <span class="visually-hidden">Tìm tổ chức</span>
+            <input type="search" id="f13-search" placeholder="Tìm tổ chức, vd Wells Fargo" autocomplete="off">
+          </label>
+        </div>
+        <dl class="contrib-facts" id="f13-facts"></dl>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="t-rank">#</th>
+                <th>Tổ chức</th>
+                <th class="t-num">Số cổ phiếu</th>
+                <th class="t-num">Giá trị cuối quý</th>
+                <th class="t-num">So với quý trước</th>
+                <th class="t-num">Ngày nộp</th>
+              </tr>
+            </thead>
+            <tbody id="f13-body"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-more" id="f13-more" hidden></button>
+        <ul class="caveats">
+          <li><strong>Số liệu là ảnh chụp ngày cuối quý</strong>, nộp chậm tới 45 ngày. Từ đó tới nay họ có thể đã mua thêm hoặc bán.</li>
+          <li><strong>Phần lớn là tiền của khách hàng.</strong> Con số của ngân hàng và công ty môi giới (Wells Fargo, Morgan Stanley…) chủ yếu là cổ phiếu ETF trong tài khoản khách mà họ quản lý, không phải ngân hàng tự bỏ tiền mua.</li>
+          <li><strong>Chỉ thấy chiều mua.</strong> 13F không ghi vị thế bán khống hay phòng hộ; quỹ nắm nhiều chưa chắc đang đặt cược BTC tăng. Bảng này đã bỏ quyền chọn (put/call).</li>
+          <li>Chỉ tổ chức quản lý trên 100 triệu USD chứng khoán Mỹ mới phải nộp. Bảng hiện 100 tổ chức nắm nhiều nhất mỗi quỹ.</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="footnote">
+      <p>Lượng BTC các quỹ lấy từ Bitbo (BitcoinTreasuries), mỗi ngày ghi lại một lần; các cột thay đổi và biểu đồ tính từ những lần ghi đó nên chỉ có từ ngày trang bắt đầu ghi. Báo cáo 13F lấy trực tiếp từ SEC EDGAR. Giá trị quy đổi theo giá BTC/USDT trên Binance lúc mở trang. Giá trị cuối quý của 13F = số cổ phiếu × giá cổ phiếu cuối quý (suy từ chính các báo cáo). Dữ liệu tự cập nhật mỗi ngày.</p>
+    </footer>
+  </div>
+
+  <script>
+    ['market.js', 'etf.js'].forEach((src) => {
+      const s = document.createElement('script');
+      s.src = `${src}?v=${Date.now()}`;
+      s.async = false;
+      document.body.appendChild(s);
+    });
+  </script>
+</body>
+</html>

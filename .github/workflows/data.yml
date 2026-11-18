@@ -1,0 +1,55 @@
+# Mỗi ngày gom dữ liệu cho trang ETF (etf.html) vào thư mục data/ rồi đăng lại trang.
+# Chỉ commit thư mục data/; không bao giờ đụng tới sổ cổ phần (calculated.js, portfolio.js).
+# Nguồn nào lỗi thì giữ số cũ của phần đó, vẫn commit phần lấy được, và lần chạy báo đỏ.
+name: Cập nhật dữ liệu ETF
+
+on:
+  schedule:
+    # 01:23 UTC = 08:23 giờ Việt Nam, sau khi thị trường Mỹ đóng cửa.
+    - cron: '23 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # Để gọi workflow đăng trang: commit bằng GITHUB_TOKEN không tự kích hoạt workflow "on: push".
+  actions: write
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Lấy dữ liệu
+        id: fetch
+        continue-on-error: true
+        run: node tools/fetch-data.js
+      - name: Commit thư mục data/ nếu có thay đổi, rồi đăng lại trang
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # pages.yml chạy npm test trước khi đăng cả trang sổ cổ phần: dữ liệu hỏng mà lọt vào main
+          # sẽ chặn luôn việc đăng các giao dịch góp/rút. Kiểm tra trước, hỏng thì không commit.
+          node --test tools/test-data.js
+          git add data
+          if git diff --cached --quiet; then echo "Không có gì thay đổi"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Cập nhật dữ liệu ETF $(date -u +%F)"
+          # Có thể vừa có giao dịch góp/rút được push trong lúc chạy: nối lên trên rồi mới push.
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && break
+            if [ "$i" = 3 ]; then echo "Push thất bại sau 3 lần"; exit 1; fi
+            sleep 5
+          done
+          gh workflow run pages.yml --ref main
+      - name: Báo đỏ nếu có nguồn lỗi
+        if: steps.fetch.outcome == 'failure'
+        run: exit 1

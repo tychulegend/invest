@@ -3,6 +3,6 @@
   "private": true,
   "description": "Sổ cổ phần gia đình: trang tĩnh cho GitHub Pages",
   "scripts": {
-    "test": "node --test tools/test.js"
+    "test": "node --test tools/test.js tools/test-data.js"
   }
 }
