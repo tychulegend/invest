@@ -20,9 +20,9 @@ và không ghi `core.js`/`calculated.js`/`portfolio.js`.
 | `tools/tx.js` | Góp/rút từ dòng lệnh với giá Binance live. |
 | `.github/workflows/pages.yml` | Mỗi lần push: chạy `npm test` (kèm kiểm tra lịch sử chỉ nối thêm so với trước lần push), qua mới deploy Pages. |
 | `companies.html` + `companies.js` | Trang công ty/chính phủ nắm BTC. Gọi thẳng API công khai CoinGecko từ trình duyệt (không key, giới hạn theo IP nên có cache localStorage). |
-| `etf.html` + `etf.js` | Trang ETF Bitcoin: lượng BTC từng quỹ và tổ chức nắm IBIT/FBTC/ARKB theo 13F. Chỉ đọc `data/*.json`. |
+| `etf.html` + `etf.js` | Trang ETF Bitcoin: lượng BTC từng quỹ và tổ chức nắm các ETF Bitcoin giao ngay ở Mỹ theo 13F (từng quỹ, và gộp mọi quỹ theo tổ chức). Chỉ đọc `data/*.json`. |
 | `market.js` | Phần dùng chung của hai trang trên (định dạng, theme, cache, biểu đồ). Không dùng `FundCore`. |
-| `tools/fetch-data.js` | Gom dữ liệu trang ETF vào `data/`: Bitbo (lượng BTC các quỹ, mỗi ngày nối một dòng vào `history`) và SEC EDGAR (13F). Luôn xưng là bot; nguồn chặn bot (vd Farside) thì không dùng. |
+| `tools/fetch-data.js` | Gom dữ liệu trang ETF vào `data/`: Bitbo (lượng BTC các quỹ, mỗi ngày nối một dòng vào `history`) và SEC EDGAR (13F; danh sách quỹ là `F13_ETFS`, đổi danh sách thì cache `data/13f-cache/` tự bỏ và lần chạy đó tải lại vài nghìn báo cáo, nên chạy ở máy rồi commit `data/`). Luôn xưng là bot; nguồn chặn bot (vd Farside) thì không dùng. |
 | `tools/test-data.js` | Test phần đọc dữ liệu ở trên và cấu trúc `data/*.json`; chạy chung trong `npm test`. |
 | `.github/workflows/data.yml` | Mỗi ngày 08:23 giờ VN chạy `fetch-data.js`, bot commit **chỉ thư mục `data/`** lên `main` rồi gọi `pages.yml` đăng lại. Vì vậy `main` trên GitHub thường đi trước máy: luôn `git pull` trước khi làm. |
 

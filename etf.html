@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ETF Bitcoin</title>
-  <meta name="description" content="Lượng Bitcoin các quỹ ETF đang nắm và các tổ chức đang nắm IBIT, FBTC, ARKB theo báo cáo 13F.">
+  <meta name="description" content="Lượng Bitcoin các quỹ ETF đang nắm và các tổ chức đang nắm ETF Bitcoin theo báo cáo 13F.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="theme-color" content="#13233B">
@@ -88,7 +88,7 @@
               <tr>
                 <th class="t-rank">#</th>
                 <th>Tổ chức</th>
-                <th class="t-num">Số cổ phiếu</th>
+                <th class="t-num" id="f13-th-a">Số cổ phiếu</th>
                 <th class="t-num">Giá trị cuối quý</th>
                 <th class="t-num">So với quý trước</th>
                 <th class="t-num">Ngày nộp</th>
@@ -102,13 +102,14 @@
           <li><strong>Số liệu là ảnh chụp ngày cuối quý</strong>, nộp chậm tới 45 ngày. Từ đó tới nay họ có thể đã mua thêm hoặc bán.</li>
           <li><strong>Phần lớn là tiền của khách hàng.</strong> Con số của ngân hàng và công ty môi giới (Wells Fargo, Morgan Stanley…) chủ yếu là cổ phiếu ETF trong tài khoản khách mà họ quản lý, không phải ngân hàng tự bỏ tiền mua.</li>
           <li><strong>Chỉ thấy chiều mua.</strong> 13F không ghi vị thế bán khống hay phòng hộ; quỹ nắm nhiều chưa chắc đang đặt cược BTC tăng. Bảng này đã bỏ quyền chọn (put/call).</li>
-          <li>Chỉ tổ chức quản lý trên 100 triệu USD chứng khoán Mỹ mới phải nộp. Bảng hiện 100 tổ chức nắm nhiều nhất mỗi quỹ.</li>
+          <li>Chỉ tổ chức quản lý trên 100 triệu USD chứng khoán Mỹ mới phải nộp. Bảng hiện 100 tổ chức nắm nhiều nhất.</li>
+          <li><strong>Mục "Tất cả" chỉ cộng các ETF Bitcoin giao ngay niêm yết ở Mỹ</strong> (các mã trên thanh chọn). Không gồm quỹ ở nước khác, quỹ hợp đồng tương lai, hay BTC tổ chức tự nắm trực tiếp. Cột "≈ BTC" là giá trị cuối quý chia cho giá BTC cùng ngày, nên là số ước lượng.</li>
         </ul>
       </div>
     </section>
 
     <footer class="footnote">
-      <p>Lượng BTC các quỹ lấy từ Bitbo (BitcoinTreasuries), mỗi ngày ghi lại một lần; các cột thay đổi và biểu đồ tính từ những lần ghi đó nên chỉ có từ ngày trang bắt đầu ghi. Báo cáo 13F lấy trực tiếp từ SEC EDGAR. Giá trị quy đổi theo giá BTC/USDT trên Binance lúc mở trang. Giá trị cuối quý của 13F = số cổ phiếu × giá cổ phiếu cuối quý (suy từ chính các báo cáo). Dữ liệu tự cập nhật mỗi ngày.</p>
+      <p>Lượng BTC các quỹ lấy từ Bitbo (BitcoinTreasuries), mỗi ngày ghi lại một lần; các cột thay đổi và biểu đồ tính từ những lần ghi đó nên chỉ có từ ngày trang bắt đầu ghi. Báo cáo 13F lấy trực tiếp từ SEC EDGAR. Giá trị quy đổi theo giá BTC/USDT trên Binance lúc mở trang. Giá trị cuối quý của 13F = số cổ phiếu × giá cổ phiếu cuối quý (suy từ chính các báo cáo). Ở mục "Tất cả", cột so với quý trước tính số cổ phiếu quý trước theo giá quý này, nên chỉ phản ánh mua thêm hay bán bớt, không lẫn phần giá tăng giảm. Dữ liệu tự cập nhật mỗi ngày.</p>
     </footer>
   </div>
 

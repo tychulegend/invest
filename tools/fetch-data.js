@@ -3,7 +3,8 @@
 // (.github/workflows/data.yml) vì hai nguồn dưới đây không cho trình duyệt gọi thẳng (không CORS):
 //   - holdings: lượng BTC từng quỹ đang nắm (bitbo.io/treasuries). Mỗi ngày lưu một dòng vào
 //               history; trang tự tính dòng BTC vào/ra từ chênh lệch giữa các ngày.
-//   - 13f:      tổ chức nào nắm cổ phiếu IBIT/FBTC/ARKB theo báo cáo 13F nộp SEC (EDGAR).
+//   - 13f:      tổ chức nào nắm cổ phiếu các ETF Bitcoin giao ngay ở Mỹ (F13_ETFS) theo báo cáo 13F
+//               nộp SEC (EDGAR), từng quỹ và gộp mọi quỹ theo tổ chức.
 // Không đụng tới sổ cổ phần (core.js, calculated.js, portfolio.js).
 //
 //   node tools/fetch-data.js              # cả hai
@@ -23,11 +24,25 @@ const F13_FILE = path.join(DATA_DIR, '13f.json');
 const F13_CACHE_DIR = path.join(DATA_DIR, '13f-cache');
 
 // CUSIP là mã định danh chứng khoán dùng trong 13F; tra theo mã chắc hơn theo tên quỹ.
+// Chỉ quỹ nắm BTC thật (giao ngay): không gồm quỹ ETH/SOL, quỹ bán quyền chọn lấy thu nhập, quỹ cổ phiếu
+// đào coin, vì phần gộp cộng giá trị các quỹ lại thành "lượng BTC nắm gián tiếp".
+// Mã lấy từ chính bảng 13F của các tổ chức lớn; thêm quỹ thì kiểm lại theo cách đó, đừng gõ theo trí nhớ.
 const F13_ETFS = [
   { ticker: 'IBIT', cusip: '46438F101', name: 'iShares Bitcoin Trust (BlackRock)' },
   { ticker: 'FBTC', cusip: '315948109', name: 'Fidelity Wise Origin Bitcoin Fund' },
+  { ticker: 'GBTC', cusip: '389637109', name: 'Grayscale Bitcoin Trust' },
+  { ticker: 'BTC', cusip: '389930207', name: 'Grayscale Bitcoin Mini Trust' },
+  { ticker: 'BITB', cusip: '09174C104', name: 'Bitwise Bitcoin ETF' },
   { ticker: 'ARKB', cusip: '040919102', name: 'ARK 21Shares Bitcoin ETF' },
+  { ticker: 'HODL', cusip: '92189K105', name: 'VanEck Bitcoin ETF' },
+  { ticker: 'MSBT', cusip: '61692G109', name: 'Morgan Stanley Bitcoin Trust' },
+  { ticker: 'BRRR', cusip: '91916J100', name: 'CoinShares Bitcoin ETF' },
+  { ticker: 'EZBC', cusip: '354921108', name: 'Franklin Bitcoin ETF' },
+  { ticker: 'BTCO', cusip: '46091J101', name: 'Invesco Galaxy Bitcoin ETF' },
+  { ticker: 'BTCW', cusip: '97720F101', name: 'WisdomTree Bitcoin Fund' },
 ];
+// Cache chỉ giữ số của các quỹ trong danh sách lúc tải; danh sách đổi thì cache cũ thiếu quỹ mới, phải tải lại.
+const F13_CACHE_KEY = F13_ETFS.map((e) => e.cusip).sort().join(',');
 const F13_TOP = 100;
 // Hạn nộp 13F là 45 ngày sau khi quý kết thúc; trước hạn thì quý đó mới có lác đác vài báo cáo.
 // Cộng thêm 3 ngày: hạn rơi vào cuối tuần thì dời sang thứ Hai, và các tổ chức lớn nhất hay nộp sát hạn.
@@ -43,10 +58,11 @@ const addDays = (iso, n) => isoDay(new Date(Date.parse(`${iso}T00:00:00Z`) + n *
 async function get(url, { as = 'text', tries = 4, timeoutMs = 60000 } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    if (i) await sleep(1500 * 2 ** (i - 1));
+    // 429 là nguồn đang phạt vì gọi dồn (SEC khoá khoảng 10 phút, gọi tiếp thì khoá lâu thêm): nghỉ hẳn rồi mới thử lại.
+    if (i) await sleep(lastErr && lastErr.status === 429 ? 20000 * i : 1500 * 2 ** (i - 1));
     try {
       const res = await fetch(url, { headers: { 'User-Agent': BOT_UA, Accept: '*/*' }, signal: AbortSignal.timeout(timeoutMs) });
-      if (res.status === 429 || res.status >= 500) { lastErr = new Error(`HTTP ${res.status} ${url}`); continue; }
+      if (res.status === 429 || res.status >= 500) { lastErr = Object.assign(new Error(`HTTP ${res.status} ${url}`), { status: res.status }); continue; }
       if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} ${url}`), { fatal: true });
       return as === 'json' ? await res.json() : await res.text();
     } catch (e) {
@@ -129,14 +145,19 @@ function f13Periods(today) {
   return ends;
 }
 
-/** SEC cho tối đa 10 lần gọi mỗi giây; chạy 4 luồng, mỗi lần cách nhau một nhịp. */
-async function pool(items, worker, size = 4, gapMs = 220) {
-  let i = 0;
+/**
+ * SEC cho tối đa 10 lần gọi mỗi giây, vượt là khoá cả IP. Chạy 4 luồng nhưng các lần gọi xếp chung một
+ * hàng, cách nhau gapMs (5 lần/giây): nghỉ riêng từng luồng thì lúc SEC trả lời nhanh sẽ vượt ngưỡng.
+ */
+async function pool(items, worker, size = 4, gapMs = 200) {
+  let i = 0, nextSlot = 0;
   const run = async () => {
     while (i < items.length) {
       const item = items[i++];
+      const now = Date.now(), at = Math.max(now, nextSlot);
+      nextSlot = at + gapMs;
+      if (at > now) await sleep(at - now);
       await worker(item);
-      await sleep(gapMs);
     }
   };
   await Promise.all(Array.from({ length: size }, run));
@@ -192,11 +213,14 @@ const median = (xs) => {
 
 /**
  * Gom mọi báo cáo của một quý vào cache (data/13f-cache/<quý>.json), chỉ tải báo cáo chưa có.
+ * Cache ghi kèm danh sách CUSIP đã đọc; khác danh sách hiện tại thì bỏ, tải lại từ đầu.
  * @returns {Object<string, {cik, name, filed, form, shares, value}>} theo số hồ sơ (adsh)
  */
 async function loadPeriod(period, today) {
   const file = path.join(F13_CACHE_DIR, `${period}.json`);
-  const cache = readJson(file, {});
+  const saved = readJson(file, {});
+  const cache = saved.cusips === F13_CACHE_KEY && saved.filings ? saved.filings : {};
+  const save = () => writeJson(file, { cusips: F13_CACHE_KEY, filings: cache });
   const wanted = new Map();
   for (const etf of F13_ETFS) {
     const list = await listFilings(etf.cusip, period, today);
@@ -213,9 +237,9 @@ async function loadPeriod(period, today) {
       failed++;
       console.warn(`  bỏ qua ${f.adsh}: ${e.message}`);
     }
-    if (++done % 200 === 0) { console.log(`  đã tải ${done}/${todo.length}`); writeJson(file, cache); }
+    if (++done % 200 === 0) { console.log(`  đã tải ${done}/${todo.length}`); save(); }
   });
-  if (todo.length) writeJson(file, cache);
+  if (todo.length) save();
   if (failed > Math.max(20, todo.length * 0.05)) throw new Error(`${failed}/${todo.length} báo cáo quý ${period} tải lỗi`);
   return cache;
 }
@@ -246,10 +270,44 @@ const impliedPrice = (holders) => {
 /** EDGAR ghi tên kèm mã chứng khoán và bang đăng ký: "WELLS FARGO & COMPANY/MN (WFC, WFC-PA)" thành "WELLS FARGO & COMPANY". */
 const cleanName = (name) => String(name).replace(/\s*\([A-Z0-9][A-Z0-9,. -]*\)\s*$/, '').replace(/\s*\/[A-Z]{2}\/?$/, '').trim();
 
+/**
+ * Gộp mọi quỹ theo tổ chức. Tính trên toàn bộ tổ chức của từng quỹ (không phải top 100 mỗi quỹ) nên
+ * tổ chức nắm ít ở nhiều quỹ vẫn được cộng đủ. Giá trị = số cổ phiếu × giá cuối quý của từng quỹ.
+ * `prevValue` tính theo giá quý trước (giá trị thật lúc đó); trang so sánh mua/bán bằng số cổ phiếu.
+ */
+function combine13F(etfs, maps) {
+  const orgs = new Map(), prevCiks = new Set();
+  let value = 0, prevValue = 0;
+  for (const etf of F13_ETFS) {
+    const t = etf.ticker, e = etfs[t], { now, before } = maps[t];
+    value += e.shares * (e.price || 0);
+    prevValue += e.prevShares * (e.prevPrice || 0);
+    for (const cik of before.keys()) prevCiks.add(cik);
+    for (const h of now.values()) {
+      let o = orgs.get(h.cik);
+      if (!o) orgs.set(h.cik, o = { cik: h.cik, name: cleanName(h.name), filed: h.filed, value: 0, shares: {}, prevShares: {} });
+      if (h.filed > o.filed) { o.filed = h.filed; o.name = cleanName(h.name); }
+      o.shares[t] = h.shares;
+      o.value += h.shares * (e.price || 0);
+    }
+  }
+  // Quỹ mà tổ chức đã bán hết trong quý vẫn phải tính vào số quý trước, không thì trông như họ không bán gì.
+  for (const etf of F13_ETFS) {
+    for (const h of maps[etf.ticker].before.values()) {
+      const o = orgs.get(h.cik);
+      if (o) o.prevShares[etf.ticker] = h.shares;
+    }
+  }
+  const top = [...orgs.values()].sort((a, b) => b.value - a.value || (a.cik < b.cik ? -1 : 1)).slice(0, F13_TOP)
+    .map(({ value: v, ...o }) => o);
+  return { holders: orgs.size, prevHolders: prevCiks.size, value: Math.round(value), prevValue: Math.round(prevValue), top };
+}
+
 function summarize13F(period, prevPeriod, cur, prev, updatedAt) {
-  const etfs = {};
+  const etfs = {}, maps = {};
   for (const etf of F13_ETFS) {
     const now = holdersOf(cur, etf.ticker), before = holdersOf(prev, etf.ticker);
+    maps[etf.ticker] = { now, before };
     const sum = (m) => [...m.values()].reduce((s, h) => s + h.shares, 0);
     const top = [...now.values()].sort((a, b) => b.shares - a.shares).slice(0, F13_TOP)
       .map((h) => ({ cik: h.cik, name: cleanName(h.name), filed: h.filed, shares: h.shares, prevShares: before.has(h.cik) ? before.get(h.cik).shares : 0 }));
@@ -261,7 +319,7 @@ function summarize13F(period, prevPeriod, cur, prev, updatedAt) {
       top,
     };
   }
-  return { source: 'sec.gov EDGAR 13F', updatedAt, period, prevPeriod, etfs };
+  return { source: 'sec.gov EDGAR 13F', updatedAt, period, prevPeriod, etfs, all: combine13F(etfs, maps) };
 }
 
 async function fetch13F(today, updatedAt) {
@@ -305,7 +363,7 @@ async function main() {
     try {
       const out = await fetch13F(today, updatedAt);
       writeJson(F13_FILE, out);
-      console.log(`13f: quý ${out.period}, ${F13_ETFS.map((e) => `${e.ticker} ${out.etfs[e.ticker].holders} tổ chức`).join(', ')}`);
+      console.log(`13f: quý ${out.period}, ${out.all.holders} tổ chức; ${F13_ETFS.map((e) => `${e.ticker} ${out.etfs[e.ticker].holders}`).join(', ')}`);
     } catch (e) { failed.push(`13f: ${e.message}`); }
   }
 
@@ -316,4 +374,4 @@ async function main() {
 }
 
 if (require.main === module) main();
-module.exports = { parseHoldings, parseInfoTable, appendHoldingsHistory, f13Periods, holdersOf, summarize13F };
+module.exports = { F13_ETFS, parseHoldings, parseInfoTable, appendHoldingsHistory, f13Periods, holdersOf, summarize13F };

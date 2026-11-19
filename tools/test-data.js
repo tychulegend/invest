@@ -60,15 +60,54 @@ test('summarize13F: bản nộp sau thay bản trước, xếp theo số cổ ph
   assert.deepEqual(e.top.map((h) => [h.cik, h.shares, h.prevShares]), [['1', 300, 120], ['2', 200, 0]]);
 });
 
+test('summarize13F: gộp theo tổ chức trên mọi quỹ, kể cả quỹ đã bán hết trong quý', () => {
+  const f = (cik, filed, shares, price) => ({
+    cik, name: `Org ${cik}`, filed, form: '13F-HR', shares,
+    value: Object.fromEntries(Object.entries(shares).map(([t, n]) => [t, n * price[t]])),
+  });
+  const p = { IBIT: 50, FBTC: 80, ARKB: 30 }, pp = { IBIT: 40, FBTC: 60, ARKB: 20 };
+  const cur = {
+    a1: f('1', '2026-11-01', { IBIT: 100, FBTC: 10 }, p), // 5000 + 800
+    b1: f('2', '2026-11-05', { IBIT: 110 }, p), // 5500
+    c1: f('3', '2026-11-06', { FBTC: 100 }, p), // 8000
+  };
+  const prev = {
+    p1: f('1', '2026-08-01', { IBIT: 50, ARKB: 40 }, pp), // 2000 + 800, đã bán hết ARKB
+    p4: f('4', '2026-08-02', { ARKB: 10 }, pp), // 200, quý này không còn nắm gì
+  };
+  const all = D.summarize13F('2026-09-30', '2026-06-30', cur, prev, 'now').all;
+  assert.equal(all.holders, 3);
+  assert.equal(all.prevHolders, 2);
+  assert.equal(all.value, 19300);
+  assert.equal(all.prevValue, 3000);
+  assert.deepEqual(all.top.map((h) => h.cik), ['3', '1', '2']);
+  assert.deepEqual(all.top[1], { cik: '1', name: 'Org 1', filed: '2026-11-01', shares: { IBIT: 100, FBTC: 10 }, prevShares: { IBIT: 50, ARKB: 40 } });
+  assert.deepEqual(all.top[0].prevShares, {});
+});
+
 test('data/ đang commit: đúng cấu trúc trang ETF cần', () => {
   const dir = path.join(__dirname, '..', 'data');
   const etf = JSON.parse(fs.readFileSync(path.join(dir, 'etf.json'), 'utf8'));
   assert.ok(etf.holdings.totalBtc > 0 && etf.holdings.funds.length > 5 && etf.holdings.history.length >= 1);
   for (const h of etf.holdings.history) assert.match(h.date, /^\d{4}-\d{2}-\d{2}$/);
   const f13 = JSON.parse(fs.readFileSync(path.join(dir, '13f.json'), 'utf8'));
-  for (const t of ['IBIT', 'FBTC', 'ARKB']) {
+  const tickers = D.F13_ETFS.map((e) => e.ticker);
+  assert.deepEqual(Object.keys(f13.etfs).sort(), [...tickers].sort());
+  for (const t of tickers) {
     const e = f13.etfs[t];
     assert.ok(e.holders > 0 && e.price > 0 && e.top.length > 0, t);
     for (const h of e.top) assert.ok(h.name && Number.isInteger(h.shares) && h.shares > 0 && h.prevShares >= 0, `${t} ${h.name}`);
   }
+  // Phần gộp: mỗi tổ chức một dòng, xếp giảm dần theo tổng giá trị, và không vượt tổng của các quỹ.
+  const a = f13.all, valueOf = (h) => Object.entries(h.shares).reduce((s, [t, n]) => s + n * f13.etfs[t].price, 0);
+  assert.ok(a.holders >= Math.max(...tickers.map((t) => f13.etfs[t].holders)) && a.value > 0 && a.top.length > 0);
+  assert.equal(new Set(a.top.map((h) => h.cik)).size, a.top.length);
+  let last = Infinity, sum = 0;
+  for (const h of a.top) {
+    const v = valueOf(h);
+    assert.ok(h.name && v > 0 && v <= last + 1e-6, h.name);
+    for (const [t, n] of [...Object.entries(h.shares), ...Object.entries(h.prevShares)]) assert.ok(tickers.includes(t) && Number.isInteger(n) && n > 0, `${h.name} ${t}`);
+    last = v; sum += v;
+  }
+  assert.ok(sum <= a.value * 1.000001);
 });
